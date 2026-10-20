@@ -1,10 +1,15 @@
 import { addDays, todayISO } from '../domain/dates';
 import {
+  FEMALE_STAGES,
+  MALE_STAGES,
   activeWithdrawals,
   can,
   expectedFarrowDate,
   isSelfOrDescendant,
+  normalizeStage,
   parentAgeProblem,
+  parityForFarrow,
+  planBreedingHeat,
   roleLabel,
   saleBlockReason,
   showEntryBlock,
@@ -15,7 +20,7 @@ import {
 import type { HerdDb } from './driver';
 import { blankToNull, uid, type SqlValue } from './ids';
 import { rowToCamel } from './map';
-import { DATA_TABLES, RESTORE_TABLES, SCHEMA_SQL } from './schema';
+import { COLUMN_MIGRATIONS, DATA_TABLES, RESTORE_TABLES, SCHEMA_SQL } from './schema';
 import { buildSeed, SEED_VERSION } from './seed';
 import type {
   Actor,
@@ -180,12 +185,23 @@ export function createRepo(db: HerdDb) {
 
   async function ensureReady(today = todayISO()): Promise<Snapshot> {
     await db.exec(SCHEMA_SQL);
+    for (const statement of COLUMN_MIGRATIONS) {
+      try {
+        await db.exec(statement);
+      } catch {
+        // The column is already in a database created from the current schema.
+      }
+    }
     const existing = await db.get<{ id: string }>('SELECT id FROM farms LIMIT 1');
     const version = await meta('seed_version');
     const modified = await meta('user_modified');
     if (!existing || (version !== SEED_VERSION && modified !== '1')) {
       await wipe();
       await applySeed(today);
+    } else if ((await meta('stage_model')) !== '2') {
+      await db.exec(`UPDATE pigs SET stage = 'nursery' WHERE stage = 'weaner'`);
+      await db.exec(`UPDATE pigs SET castrated = 1 WHERE stage = 'barrow' AND IFNULL(castrated, 0) = 0`);
+      await setMeta('stage_model', '2');
     }
     await db.flush();
     return load();
@@ -238,9 +254,27 @@ export function createRepo(db: HerdDb) {
   }
 
   async function pigsForParents() {
-    return many<{ id: string; gender: string; dob: string | null; sireId: string | null; damId: string | null }>(
-      'SELECT id, gender, dob, sire_id, dam_id FROM pigs WHERE deleted_at IS NULL',
-    );
+    return many<{
+      id: string;
+      gender: string;
+      dob: string | null;
+      sireId: string | null;
+      damId: string | null;
+      castrated: number | null;
+      stage: string;
+    }>('SELECT id, gender, dob, sire_id, dam_id, castrated, stage FROM pigs WHERE deleted_at IS NULL');
+  }
+
+  function assertWithdrawal(days: number | null | undefined) {
+    if (days != null && days < 0) throw new HerdError('Withdrawal days cannot be negative.');
+  }
+
+  function assertExtraLabel(input: { eldu?: boolean; elduVet?: string; vetName?: string; withdrawalDays?: number | null }) {
+    if (!input.eldu) return;
+    if (!(input.elduVet || '').trim() && !(input.vetName || '').trim()) {
+      throw new HerdError('Extra-label use needs the veterinarian’s name.');
+    }
+    if (input.withdrawalDays == null) throw new HerdError('Extra-label use needs a withdrawal time.');
   }
 
   async function savePig(actor: Actor, input: PigInput, id?: string) {
@@ -253,10 +287,9 @@ export function createRepo(db: HerdDb) {
       [current.id, tag, id || ''],
     );
     if (duplicate) throw new HerdError(`Tag ${tag} is already on another pig.`);
-    const female = ['piglet', 'weaner', 'gilt', 'sow'];
-    const male = ['piglet', 'weaner', 'boar', 'barrow'];
-    if (input.gender === 'female' && !female.includes(input.stage)) throw new HerdError('That stage does not match a female pig.');
-    if (input.gender === 'male' && !male.includes(input.stage)) throw new HerdError('That stage does not match a male pig.');
+    const stage = normalizeStage(input.stage);
+    const allowed = input.gender === 'female' ? FEMALE_STAGES : MALE_STAGES;
+    if (!allowed.includes(stage)) throw new HerdError('That stage does not match this pig.');
     if (input.photoUri && input.photoUri.length > 4_500_000) throw new HerdError('Photo has to be 3 MB or smaller.');
     const existing = id ? await one<Pig>('SELECT * FROM pigs WHERE id = ?', [id]) : null;
     let status = input.status;
@@ -274,6 +307,9 @@ export function createRepo(db: HerdDb) {
       const parent = family.find((pig) => pig.id === parentId);
       if (!parent) throw new HerdError(`${label} was not found.`);
       if (parent.gender !== expected) throw new HerdError(`${label} has to be ${expected}.`);
+      if (expected === 'male' && (parent.castrated || parent.stage === 'barrow')) {
+        throw new HerdError('A castrated pig cannot be the sire.');
+      }
       if (id && isSelfOrDescendant(id, parentId, family.map((pig) => ({ id: pig.id, sireId: pig.sireId, damId: pig.damId })))) {
         throw new HerdError(`That ${label} is this pig or one of its descendants.`);
       }
@@ -283,12 +319,29 @@ export function createRepo(db: HerdDb) {
     checkParent(input.sireId, 'male', 'sire');
     checkParent(input.damId, 'female', 'dam');
     if (input.sireId && input.sireId === input.damId) throw new HerdError('Sire and dam have to be different pigs.');
+    let litterId = input.litterId;
+    if (!litterId && input.litterNumber.trim()) {
+      if (input.damId) {
+        const match = await db.get<{ id: string }>(
+          `SELECT id FROM litters WHERE deleted_at IS NULL AND sow_id = ? AND lower(litter_number) = lower(?) ORDER BY farrow_date DESC LIMIT 1`,
+          [input.damId, input.litterNumber.trim()],
+        );
+        if (match) litterId = match.id;
+      } else {
+        const matches = await db.all<{ id: string }>(
+          `SELECT id FROM litters WHERE deleted_at IS NULL AND lower(litter_number) = lower(?)`,
+          [input.litterNumber.trim()],
+        );
+        if (matches.length === 1) litterId = matches[0].id;
+      }
+    }
     const row: Record<string, SqlValue> = {
       tag,
       name: blankToNull(input.name),
       litter_number: blankToNull(input.litterNumber),
       gender: input.gender,
-      stage: input.stage,
+      stage,
+      castrated: input.gender === 'male' && (input.castrated || stage === 'barrow') ? 1 : 0,
       status,
       breed_id: input.breedId,
       group_id: input.groupId,
@@ -306,7 +359,7 @@ export function createRepo(db: HerdDb) {
       ear_notch: blankToNull(input.earNotch),
       show_tag: blankToNull(input.showTag),
       registration_no: blankToNull(input.registrationNo),
-      litter_id: input.litterId,
+      litter_id: litterId,
       ...stamp(actor, !id),
     };
     const pigId = id || uid();
@@ -348,10 +401,13 @@ export function createRepo(db: HerdDb) {
       if (!input.saleAmountCents || input.saleAmountCents <= 0) throw new HerdError('A sale needs a price greater than zero.');
       if (!input.buyerName.trim() && !input.buyerId) throw new HerdError('A sale needs a buyer.');
       const events = await many<HerdEvent>('SELECT * FROM events WHERE deleted_at IS NULL AND pig_id = ?', [pig.id]);
-      const block = saleBlockReason(activeWithdrawals(events.filter((event) => event.id !== id), pig.id, todayISO()));
+      const block = saleBlockReason(activeWithdrawals(events.filter((event) => event.id !== id), pig.id, input.eventDate));
       if (block) throw new HerdError(block);
     }
-    if ((type === 'death' || type === 'cull') && !input.cause.trim()) throw new HerdError('Add a cause.');
+    if ((type === 'farrowing' || type === 'weaning') && input.eventDate > todayISO()) {
+      throw new HerdError('Farrowing and weaning have to be on or before today.');
+    }
+    if ((type === 'death' || type === 'cull') && !input.cause.trim()) throw new HerdError('A death or cull needs a cause.');
     if (type === 'weight' && (input.weightLb == null || input.weightLb <= 0)) throw new HerdError('Enter the weight in pounds.');
     if (type === 'treatment' && !input.drugName.trim()) throw new HerdError('Enter the drug that was given.');
     if (type === 'vaccination' && !input.vaccineName.trim()) throw new HerdError('Enter the vaccine.');
@@ -361,6 +417,8 @@ export function createRepo(db: HerdDb) {
     if (type === 'farrowing' && (input.bornAlive == null || input.bornAlive < 0)) throw new HerdError('Enter pigs born alive.');
     if (type === 'weaning' && (input.weanedCount == null || input.weanedCount < 0)) throw new HerdError('Enter how many were weaned.');
     if (type === 'breeding' && !input.sireId && !input.sireName.trim()) throw new HerdError('Name the boar or the semen used.');
+    assertWithdrawal(input.withdrawalDays);
+    assertExtraLabel(input);
 
     if (type === 'weaning' && input.litterId) {
       const litter = await one<Litter>('SELECT * FROM litters WHERE id = ?', [input.litterId]);
@@ -377,15 +435,42 @@ export function createRepo(db: HerdDb) {
 
     const withdrawalEnds =
       input.withdrawalDays != null && input.withdrawalDays >= 0 ? addDays(input.eventDate, input.withdrawalDays) : null;
-    const dueDate = type === 'breeding' ? expectedFarrowDate(input.eventDate, current.gestationDays) : null;
+    const eventId = id || uid();
+    const existing = id ? await one<HerdEvent>('SELECT * FROM events WHERE id = ?', [id]) : null;
+    let dueDate = type === 'breeding' ? expectedFarrowDate(input.eventDate, current.gestationDays) : null;
+    let heatId: string | null = existing?.heatId ?? null;
+    let returnedServiceIds: string[] = [];
+    if (type === 'breeding' && !id) {
+      const history = await many<HerdEvent>('SELECT * FROM events WHERE deleted_at IS NULL AND pig_id = ?', [pig.id]);
+      const plan = planBreedingHeat({
+        pigId: pig.id,
+        serviceDate: input.eventDate,
+        newId: eventId,
+        gestationDays: current.gestationDays,
+        services: history
+          .filter((event) => event.eventType === 'breeding')
+          .map((event) => ({ id: event.id, pigId: event.pigId, eventDate: event.eventDate, heatId: event.heatId })),
+        outcomes: history
+          .filter((event) => event.eventType === 'farrowing' || event.eventType === 'aborted' || event.eventType === 'pregnancy_check')
+          .map((event) => ({
+            id: event.id,
+            pigId: event.pigId,
+            eventType: event.eventType,
+            eventDate: event.eventDate,
+            breedingEventId: event.breedingEventId,
+            pregResult: event.pregResult,
+          })),
+      });
+      dueDate = plan.dueDate;
+      heatId = plan.heatId;
+      returnedServiceIds = plan.returnedServiceIds;
+    }
     let sireName = blankToNull(input.sireName);
     if (input.sireId) {
       const sire = await one<Pig>('SELECT * FROM pigs WHERE id = ?', [input.sireId]);
       if (sire) sireName = sire.name ? `${sire.tag} ${sire.name}` : sire.tag;
     }
     const buyerId = type === 'sale' ? await ensureBuyer(actor, input.buyerName, input.buyerId, current) : input.buyerId;
-    const eventId = id || uid();
-    const existing = id ? await one<HerdEvent>('SELECT * FROM events WHERE id = ?', [id]) : null;
     const row: Record<string, SqlValue> = {
       pig_id: input.pigId,
       event_type: type,
@@ -398,6 +483,7 @@ export function createRepo(db: HerdDb) {
       mating_method: input.matingMethod,
       technician: blankToNull(input.technician),
       due_date: dueDate,
+      heat_id: type === 'breeding' ? heatId : existing?.heatId ?? null,
       breeding_event_id: input.breedingEventId,
       preg_result: input.pregResult,
       preg_method: input.pregMethod,
@@ -418,6 +504,12 @@ export function createRepo(db: HerdDb) {
       treated_by: blankToNull(input.treatedBy),
       vet_name: blankToNull(input.vetName),
       vfd_number: blankToNull(input.vfdNumber),
+      lot_no: blankToNull(input.lotNo || ''),
+      product_expiry: input.productExpiry || null,
+      eldu: input.eldu ? 1 : 0,
+      eldu_vet: blankToNull(input.elduVet || ''),
+      vfd_expiry: input.vfdExpiry || null,
+      vfd_doc_uri: blankToNull(input.vfdDocUri || ''),
       vaccine_name: blankToNull(input.vaccineName),
       next_due_date: input.nextDueDate,
       buyer_id: buyerId,
@@ -431,14 +523,46 @@ export function createRepo(db: HerdDb) {
     if (id) await patch('events', id, row);
     else await insert('events', { id: eventId, farm_id: current.id, mass_event_id: null, ...row });
 
+    for (const serviceId of returnedServiceIds) {
+      const already = await db.get<{ id: string }>(
+        `SELECT id FROM events WHERE deleted_at IS NULL AND breeding_event_id = ? AND event_type = 'pregnancy_check' AND preg_result = 'returned'`,
+        [serviceId],
+      );
+      if (already) continue;
+      await insert('events', {
+        id: uid(),
+        farm_id: current.id,
+        pig_id: pig.id,
+        mass_event_id: null,
+        event_type: 'pregnancy_check',
+        event_date: input.eventDate,
+        breeding_event_id: serviceId,
+        preg_result: 'returned',
+        preg_method: 'return',
+        notes: 'Returned to heat. The earlier service is closed.',
+        ...stamp(actor, true),
+      });
+    }
+
     if (type === 'farrowing') {
       let litterId = input.litterId || existing?.litterId || null;
+      let parity = input.parity;
+      if (parity == null) {
+        const prior = await db.all<{ farrow_date: string }>(
+          `SELECT farrow_date FROM litters WHERE deleted_at IS NULL AND sow_id = ? AND id != ?`,
+          [input.pigId, litterId || ''],
+        );
+        parity = parityForFarrow(
+          prior.map((row) => String(row.farrow_date)),
+          input.eventDate,
+        );
+      }
       const litterFields: Record<string, SqlValue> = {
         sow_id: input.pigId,
         sire_id: input.sireId,
         breeding_event_id: input.breedingEventId,
         farrow_date: input.eventDate,
-        parity: input.parity,
+        parity,
         born_alive: input.bornAlive ?? 0,
         stillborn: input.stillborn ?? 0,
         mummies: input.mummies ?? 0,
@@ -464,9 +588,20 @@ export function createRepo(db: HerdDb) {
         ...stamp(actor),
       });
     }
-    if (type === 'weaning' && pig.stage === 'piglet') await patch('pigs', pig.id, { stage: 'weaner', ...stamp(actor) });
-    if (type === 'castration' && input.markBarrow && pig.gender === 'male') {
-      await patch('pigs', pig.id, { stage: 'barrow', ...stamp(actor) });
+    const recordedStage = pig.stage as string;
+    if (type === 'weaning' && (recordedStage === 'piglet' || recordedStage === 'weaner')) {
+      await patch('pigs', pig.id, { stage: 'nursery', ...stamp(actor) });
+    }
+    if (type === 'castration' && pig.gender === 'male') {
+      const nextStage =
+        input.markBarrow && recordedStage === 'boar'
+          ? 'finisher'
+          : input.markBarrow && recordedStage === 'piglet'
+            ? 'nursery'
+            : recordedStage === 'weaner'
+              ? 'nursery'
+              : pig.stage;
+      await patch('pigs', pig.id, { castrated: 1, stage: nextStage, ...stamp(actor) });
     }
     if (type === 'sale') {
       const title = `${pig.name ? `${pig.tag} ${pig.name}` : pig.tag} sold to ${input.buyerName.trim()}`;
@@ -554,6 +689,8 @@ export function createRepo(db: HerdDb) {
       throw new HerdError('Name the product used.');
     }
     if (input.eventType === 'other' && !input.customName.trim()) throw new HerdError('Name this event.');
+    assertWithdrawal(input.withdrawalDays);
+    assertExtraLabel(input);
     const massId = id || uid();
     const existing = id ? await one<MassEvent>('SELECT * FROM mass_events WHERE id = ?', [id]) : null;
     let expenseId = existing?.expenseId ?? null;
@@ -597,6 +734,12 @@ export function createRepo(db: HerdDb) {
       custom_name: blankToNull(input.customName),
       notes: blankToNull(input.notes),
       withdrawal_days: input.withdrawalDays,
+      lot_no: blankToNull(input.lotNo || ''),
+      product_expiry: input.productExpiry || null,
+      eldu: input.eldu ? 1 : 0,
+      eldu_vet: blankToNull(input.elduVet || ''),
+      vfd_expiry: input.vfdExpiry || null,
+      vfd_doc_uri: blankToNull(input.vfdDocUri || ''),
       cost_cents: input.costCents,
       expense_id: expenseId,
       ...stamp(actor, !id),
@@ -618,16 +761,13 @@ export function createRepo(db: HerdDb) {
     for (const child of children) {
       if (child.pigId && !keep.has(child.pigId)) await patch('events', child.id, { deleted_at: now, ...stamp(actor) });
     }
-    const withdrawalEnds = input.withdrawalDays != null ? addDays(input.eventDate, input.withdrawalDays) : null;
+    const withdrawalEnds = input.withdrawalDays != null && input.withdrawalDays >= 0 ? addDays(input.eventDate, input.withdrawalDays) : null;
     for (const pigId of pigIds) {
       const child = children.find((event) => event.pigId === pigId);
-      const childType = ['tagging', 'herd_spray', 'hoof_trim', 'other'].includes(input.eventType) && input.eventType !== 'hoof_trim'
-        ? input.eventType
-        : input.eventType;
       const fields: Record<string, SqlValue> = {
         pig_id: pigId,
         mass_event_id: massId,
-        event_type: childType,
+        event_type: input.eventType,
         event_date: input.eventDate,
         notes: blankToNull(input.notes),
         drug_name: input.eventType === 'vaccination' ? null : blankToNull(input.medicineName),
@@ -635,6 +775,12 @@ export function createRepo(db: HerdDb) {
         custom_name: blankToNull(input.customName) || (input.eventType === 'hoof_trim' ? 'Hoof trimming' : null),
         withdrawal_days: input.withdrawalDays,
         withdrawal_ends: withdrawalEnds,
+        lot_no: blankToNull(input.lotNo || ''),
+        product_expiry: input.productExpiry || null,
+        eldu: input.eldu ? 1 : 0,
+        eldu_vet: blankToNull(input.elduVet || ''),
+        vfd_expiry: input.vfdExpiry || null,
+        vfd_doc_uri: blankToNull(input.vfdDocUri || ''),
         ...stamp(actor, !child),
       };
       if (child) await patch('events', child.id, fields);
@@ -856,19 +1002,31 @@ export function createRepo(db: HerdDb) {
     const show = await one<Show>('SELECT * FROM shows WHERE id = ? AND deleted_at IS NULL', [input.showId]);
     if (!show) throw new HerdError('Choose a show.');
     const events = await many<HerdEvent>('SELECT * FROM events WHERE deleted_at IS NULL AND pig_id = ?', [input.pigId]);
-    const hold = showEntryBlock(activeWithdrawals(events, input.pigId, todayISO()), show.showDate);
-    if (hold.block) throw new HerdError(hold.block);
+    const hold = showEntryBlock(activeWithdrawals(events, input.pigId, show.showDate), show.showDate);
+    const recordingWeighIn = input.weighInLb != null;
+    const recordingSale = input.saleCents != null && input.saleCents > 0;
+    if (hold.block && (!id || recordingWeighIn || recordingSale)) {
+      throw new HerdError(id ? `Withdrawal conflict. ${hold.block}` : hold.block);
+    }
     const row: Record<string, SqlValue> = {
       show_id: input.showId,
       pig_id: input.pigId,
       exhibitor: blankToNull(input.exhibitor) || 'CG Ranch',
       class_name: blankToNull(input.className),
       target_weight_lb: input.targetWeightLb ?? show.targetWeightLb,
+      division: blankToNull(input.division || ''),
+      weight_class: blankToNull(input.weightClass || ''),
+      exhibitor_contact_id: input.exhibitorContactId || null,
+      buyer_contact_id: input.buyerContactId || null,
+      sale_cents: input.saleCents ?? null,
+      addon_cents: input.addonCents ?? null,
+      sale_event_id: input.saleEventId || null,
       ...stamp(actor, !id),
     };
+    if (input.weighInLb !== undefined) row.weigh_in_lb = input.weighInLb;
     const entryId = id || uid();
     if (id) await patch('show_entries', id, row);
-    else await insert('show_entries', { id: entryId, farm_id: current.id, weigh_in_lb: null, placing: null, premium_cents: null, ...row });
+    else await insert('show_entries', { id: entryId, farm_id: current.id, weigh_in_lb: input.weighInLb ?? null, placing: null, premium_cents: null, ...row });
     await markDirty();
     return entryId;
   }

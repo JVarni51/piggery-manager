@@ -23,6 +23,28 @@ export function percent(value: number | null | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+/** Sort tags so 4-9 comes before 11-8, and 26-7 before 26-14. */
+export function compareNatural(a: string, b: string): number {
+  const parts = (value: string) =>
+    value.split(/(\d+)/).filter((part) => part.length > 0).map((part) => (/^\d+$/.test(part) ? Number(part) : part.toLowerCase()));
+  const left = parts(a);
+  const right = parts(b);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const av = left[index];
+    const bv = right[index];
+    if (av === undefined) return -1;
+    if (bv === undefined) return 1;
+    if (typeof av === 'number' && typeof bv === 'number') {
+      if (av !== bv) return av - bv;
+    } else {
+      const cmp = String(av).localeCompare(String(bv));
+      if (cmp) return cmp;
+    }
+  }
+  return 0;
+}
+
 export function titleCase(value: string): string {
   return value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

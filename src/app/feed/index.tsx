@@ -1,8 +1,12 @@
 import { useState } from 'react';
 import { Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { can, stockOf } from '@/domain/herd';
-import { centsFromDollars, money, parseNumber, pounds } from '@/domain/format';
-import { prettyDate, todayISO } from '@/domain/dates';
+import { centsFromDollars, dollarsInput, money, parseNumber, pounds } from '@/domain/format';
+import { inRange, prettyDate, todayISO } from '@/domain/dates';
+import { toCsv } from '@/domain/csv';
+import { cleanParams, named, oneParam } from '@/lib/view';
+import { downloadText } from '@/lib/download';
 import { ui } from '@/theme';
 import { Gate } from '@/components/Gate';
 import { useSave } from '@/components/useSave';
@@ -17,7 +21,12 @@ export default function FeedPage() {
 }
 
 function Feed({ snap }: { snap: import('@/data/types').Snapshot }) {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ from?: string; to?: string }>();
+  const from = oneParam(params.from);
+  const to = oneParam(params.to);
   const { error, busy, submit } = useSave();
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [movement, setMovement] = useState<'addition' | 'reduction'>('reduction');
   const [feedTypeId, setFeedTypeId] = useState(snap.feedTypes[0]?.id || '');
   const [moveDate, setMoveDate] = useState(todayISO());
@@ -27,10 +36,48 @@ function Feed({ snap }: { snap: import('@/data/types').Snapshot }) {
   const [notes, setNotes] = useState('');
   const writable = can(snap.actor.role, 'write');
   const canDelete = can(snap.actor.role, 'delete');
+  const rangeError = from && to && from > to ? 'The From date has to be on or before the To date.' : '';
+  const moves = snap.feedMoves.filter((move) => !rangeError && (!(from || to) || inRange(move.moveDate, from || null, to || null)));
+
+  function loadMove(id: string) {
+    const move = snap.feedMoves.find((row) => row.id === id);
+    if (!move) return;
+    setEditingId(move.id);
+    setMovement(move.movement);
+    setFeedTypeId(move.feedTypeId);
+    setMoveDate(move.moveDate);
+    setQuantity(String(move.quantity));
+    setCost(dollarsInput(move.costCents));
+    setRemark(move.remark || 'fed');
+    setNotes(move.notes || '');
+  }
 
   return (
-    <Page title="Feed room" lede="Stock is in pounds. A delivery with a cost creates the expense for you, so do not also type it under Expenses.">
+    <Page
+      title="Feed room"
+      lede="Stock is in pounds. A delivery with a cost creates the expense for you, so do not also type it under Expenses."
+      action={
+        <Button
+          tone="secondary"
+          label="Download CSV"
+          onPress={() => {
+            void downloadText(
+              'herdkeep-feed.csv',
+              toCsv(
+                ['Date', 'Feed', 'Movement', 'Quantity', 'Cost', 'Remark'],
+                moves.map((move) => [move.moveDate, named(snap.feedTypes, move.feedTypeId), move.movement, move.quantity, move.costCents != null ? (move.costCents / 100).toFixed(2) : '', move.remark]),
+              ),
+            );
+          }}
+        />
+      }
+    >
       {error ? <Notice tone="bad" text={error} /> : null}
+      <Fields>
+        <DateField label="From" value={from} onChange={(value) => router.replace({ pathname: '/feed', params: cleanParams(params, { from: value }) })} />
+        <DateField label="To" value={to} onChange={(value) => router.replace({ pathname: '/feed', params: cleanParams(params, { to: value }) })} />
+      </Fields>
+      {rangeError ? <Notice tone="bad" text={rangeError} /> : null}
       <Card>
         <Text style={ui.h2}>On hand</Text>
         {snap.feedTypes.map((feed) => {
@@ -49,7 +96,7 @@ function Feed({ snap }: { snap: import('@/data/types').Snapshot }) {
       </Card>
       {writable ? (
         <Card>
-          <Text style={ui.h2}>{movement === 'addition' ? 'Delivery' : 'Feed out'}</Text>
+          <Text style={ui.h2}>{editingId ? 'Edit movement' : movement === 'addition' ? 'Delivery' : 'Feed out'}</Text>
           <Fields>
             <Select
               label="Movement"
@@ -79,30 +126,36 @@ function Feed({ snap }: { snap: import('@/data/types').Snapshot }) {
           </Fields>
           <Field label="Notes" value={notes} onChange={setNotes} />
           <Button
-            label={busy ? 'Saving…' : 'Save movement'}
+            label={busy ? 'Saving…' : editingId ? 'Save changes' : 'Save movement'}
             disabled={busy}
             onPress={() => {
               void submit(async (repo, actor) => {
-                await repo.saveFeed(actor, {
-                  movement,
-                  feedTypeId,
-                  moveDate,
-                  quantity: parseNumber(quantity) || 0,
-                  costCents: movement === 'addition' ? centsFromDollars(cost) : null,
-                  remark: movement === 'reduction' ? remark : '',
-                  doneBy: actor.name,
-                  notes,
-                });
+                await repo.saveFeed(
+                  actor,
+                  {
+                    movement,
+                    feedTypeId,
+                    moveDate,
+                    quantity: parseNumber(quantity) || 0,
+                    costCents: movement === 'addition' ? centsFromDollars(cost) : null,
+                    remark: movement === 'reduction' ? remark : '',
+                    doneBy: actor.name,
+                    notes,
+                  },
+                  editingId || undefined,
+                );
+                setEditingId(null);
                 setQuantity('');
                 setCost('');
                 setNotes('');
               });
             }}
           />
+          {editingId ? <Button tone="ghost" label="Cancel edit" onPress={() => setEditingId(null)} /> : null}
         </Card>
       ) : null}
       <StackList
-        rows={snap.feedMoves.map((move) => {
+        rows={moves.map((move) => {
           const feed = snap.feedTypes.find((row) => row.id === move.feedTypeId);
           return {
             key: move.id,
@@ -110,7 +163,10 @@ function Feed({ snap }: { snap: import('@/data/types').Snapshot }) {
             meta: prettyDate(move.moveDate),
             tone: move.movement === 'addition' ? 'good' : 'neutral',
             detail: `${move.remark || move.notes || 'No note'}${move.costCents ? ` · ${money(move.costCents)}` : ''}${move.expenseId ? ' · linked expense' : ''}`,
-            action: canDelete ? (
+            action: (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {writable ? <Button tone="ghost" label="Edit" onPress={() => loadMove(move.id)} /> : null}
+                {canDelete ? (
               <Button
                 tone="ghost"
                 label="Delete"
@@ -122,7 +178,9 @@ function Feed({ snap }: { snap: import('@/data/types').Snapshot }) {
                   })();
                 }}
               />
-            ) : undefined,
+            ) : null}
+              </View>
+            ),
           };
         })}
       />

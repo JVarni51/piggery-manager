@@ -86,7 +86,9 @@ function Lookup({ snap, kind, title }: { snap: Snapshot; kind: LookupKind; title
   const rows = kind === 'breed' ? snap.breeds : kind === 'group' ? snap.groups : kind === 'income' ? snap.incomeCategories : snap.expenseCategories;
   const { error, busy, submit } = useSave();
   const [name, setName] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
   const allowed = can(snap.actor.role, 'setup');
+  const singular = title.toLowerCase().replace(/ies$/, 'y').replace(/s$/, '');
   return (
     <Card>
       <Text style={ui.h2}>{title}</Text>
@@ -95,34 +97,56 @@ function Lookup({ snap, kind, title }: { snap: Snapshot; kind: LookupKind; title
         <ViewLine key={row.id}>
           <Text style={ui.body}>{row.name}</Text>
           {allowed ? (
-            <Button
-              tone="ghost"
-              label="Delete"
-              disabled={busy}
-              onPress={() => {
-                void (async () => {
-                  const ok = await confirmAsync(`Delete ${row.name}? In-use items stay put.`);
-                  if (!ok) return;
-                  await submit((repo, actor) => repo.deleteLookup(actor, kind, row.id));
-                })();
-              }}
-            />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Button
+                tone="ghost"
+                label="Edit"
+                disabled={busy}
+                onPress={() => {
+                  setEditingId(row.id);
+                  setName(row.name);
+                }}
+              />
+              <Button
+                tone="ghost"
+                label="Delete"
+                disabled={busy}
+                onPress={() => {
+                  void (async () => {
+                    const ok = await confirmAsync(`Delete ${row.name}? In-use items stay put.`);
+                    if (!ok) return;
+                    await submit((repo, actor) => repo.deleteLookup(actor, kind, row.id));
+                  })();
+                }}
+              />
+            </View>
           ) : null}
         </ViewLine>
       ))}
       {allowed ? (
         <Fields>
-          <Field label={`New ${title.toLowerCase().replace(/s$/, '')}`} value={name} onChange={setName} />
+          <Field label={editingId ? `Rename ${singular}` : `New ${singular}`} value={name} onChange={setName} />
           <Button
-            label="Add"
+            label={editingId ? 'Save' : 'Add'}
             disabled={busy || !name.trim()}
             onPress={() => {
               void submit(async (repo, actor) => {
-                await repo.saveLookup(actor, kind, { name });
+                await repo.saveLookup(actor, kind, { name }, editingId || undefined);
                 setName('');
+                setEditingId(null);
               });
             }}
           />
+          {editingId ? (
+            <Button
+              tone="ghost"
+              label="Cancel"
+              onPress={() => {
+                setEditingId(null);
+                setName('');
+              }}
+            />
+          ) : null}
         </Fields>
       ) : null}
     </Card>
@@ -133,6 +157,7 @@ function FeedLookups({ snap }: { snap: Snapshot }) {
   const { error, busy, submit } = useSave();
   const [name, setName] = useState('');
   const [reorder, setReorder] = useState(String(snap.farm.lowFeedLb));
+  const [editingId, setEditingId] = useState<string | null>(null);
   const allowed = can(snap.actor.role, 'setup');
   return (
     <Card>
@@ -144,7 +169,18 @@ function FeedLookups({ snap }: { snap: Snapshot }) {
           <Text style={ui.body}>{feed.name}</Text>
           <Text style={ui.small}>{feed.unit} · reorder {feed.reorderLb}</Text>
           {allowed ? (
-            <Button tone="ghost" label="Delete" onPress={() => void submit((repo, actor) => repo.deleteLookup(actor, 'feed', feed.id))} />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Button
+                tone="ghost"
+                label="Edit"
+                onPress={() => {
+                  setEditingId(feed.id);
+                  setName(feed.name);
+                  setReorder(String(feed.reorderLb));
+                }}
+              />
+              <Button tone="ghost" label="Delete" onPress={() => void submit((repo, actor) => repo.deleteLookup(actor, 'feed', feed.id))} />
+            </View>
           ) : null}
         </ViewLine>
       ))}
@@ -153,12 +189,13 @@ function FeedLookups({ snap }: { snap: Snapshot }) {
           <Field label="Name" value={name} onChange={setName} />
           <Field label="Reorder at (lb)" value={reorder} onChange={setReorder} />
           <Button
-            label="Add feed"
+            label={editingId ? 'Save feed' : 'Add feed'}
             disabled={busy || !name.trim()}
             onPress={() => {
               void submit(async (repo, actor) => {
-                await repo.saveLookup(actor, 'feed', { name, unit: 'lb', reorderLb: parseNumber(reorder) });
+                await repo.saveLookup(actor, 'feed', { name, unit: 'lb', reorderLb: parseNumber(reorder) }, editingId || undefined);
                 setName('');
+                setEditingId(null);
               });
             }}
           />

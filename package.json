@@ -8,7 +8,7 @@
     "web": "expo start --web --port 4457",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "export:web": "expo export -p web",
+    "export:web": "expo export -p web && node scripts/clean-export.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/domain/*.test.ts src/data/*.test.ts",
     "postinstall": "node scripts/copy-sql-wasm.js"

@@ -1,5 +1,5 @@
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import Svg, { G, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, G, Path, Rect, Text as SvgText } from 'react-native-svg';
 import type { MoneyBucket } from '@/domain/herd';
 import { STAGE_LABELS } from '@/domain/labels';
 import { money } from '@/domain/format';
@@ -7,12 +7,53 @@ import { colors, sans, ui } from '@/theme';
 
 const STAGE_COLOR: Record<string, string> = {
   piglet: '#C4622D',
+  nursery: '#A9792E',
   weaner: '#A9792E',
+  grower: '#C4A15A',
+  finisher: '#2C6B4F',
   gilt: '#A3476A',
   sow: '#8C4318',
   boar: '#2C5F8A',
-  barrow: '#2C6B4F',
+  barrow: '#3D6B58',
 };
+
+export function WeightChart({ points }: { points: { date: string; lb: number }[] }) {
+  const sorted = [...points].filter((point) => Number.isFinite(point.lb)).sort((a, b) => a.date.localeCompare(b.date));
+  if (sorted.length < 2) {
+    return <Text style={ui.body}>Record a second weight and the history chart will draw.</Text>;
+  }
+  const min = Math.min(...sorted.map((point) => point.lb));
+  const max = Math.max(...sorted.map((point) => point.lb));
+  const span = Math.max(1, max - min);
+  const width = Math.max(280, sorted.length * 56);
+  const height = 150;
+  const coords = sorted.map((point, index) => {
+    const x = 16 + (index / (sorted.length - 1)) * (width - 32);
+    const y = 16 + (1 - (point.lb - min) / span) * (height - 40);
+    return { ...point, x, y };
+  });
+  const path = coords.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x},${point.y}`).join(' ');
+  return (
+    <View style={{ gap: 6 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <Svg width={width} height={height}>
+          <Path d={path} stroke={colors.copper} strokeWidth={2.5} fill="none" />
+          {coords.map((point) => (
+            <G key={`${point.date}-${point.lb}`}>
+              <Circle cx={point.x} cy={point.y} r={4} fill={colors.ink} />
+              <SvgText x={point.x} y={height - 6} fontSize={10} fill={colors.muted} textAnchor="middle" fontFamily={sans}>
+                {point.date.slice(5)}
+              </SvgText>
+            </G>
+          ))}
+        </Svg>
+      </ScrollView>
+      <Text style={ui.small}>
+        {sorted[0].lb} lb on {sorted[0].date} to {sorted[sorted.length - 1].lb} lb on {sorted[sorted.length - 1].date}.
+      </Text>
+    </View>
+  );
+}
 
 export function StageChart({
   counts,

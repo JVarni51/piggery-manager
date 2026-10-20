@@ -1,7 +1,7 @@
 import { addDays, shiftDate } from '../domain/dates';
 import { seedId, type SqlValue } from './ids';
 
-export const SEED_VERSION = '1';
+export const SEED_VERSION = '2';
 const ANCHOR = '2026-10-20';
 
 export const ID = {
@@ -182,6 +182,7 @@ export function buildSeed(today: string): SeedRow[] {
       show_tag: null,
       registration_no: null,
       litter_id: null,
+      castrated: 0,
       ...audit(String(row.entry_date || row.dob || '2024-01-01')),
       ...row,
       dob: row.dob ? day(String(row.dob)) : null,
@@ -198,16 +199,16 @@ export function buildSeed(today: string): SeedRow[] {
   pig({ id: ID.patsy, tag: '23-1', name: 'Patsy', gender: 'female', stage: 'gilt', status: 'active', breed_id: ID.cross, group_id: ID.gilts, weight_lb: 295, dob: '2025-09-01', entry_date: '2025-09-01', source: 'born', notes: 'Checked open in June. Still waiting on a service.' });
   pig({ id: ID.redford, tag: '7-1', name: 'Redford', gender: 'male', stage: 'boar', status: 'active', breed_id: ID.duroc, group_id: ID.boars, weight_lb: 620, dob: '2023-04-02', entry_date: '2023-04-02', source: 'purchased', source_detail: 'Boar stud', notes: 'Herd boar for the Duroc line.' });
   pig({ id: ID.boone, tag: '4-9', name: 'Boone', gender: 'male', stage: 'boar', status: 'active', breed_id: ID.hampshire, group_id: ID.boars, weight_lb: 580, dob: '2022-12-11', entry_date: '2022-12-11', source: 'purchased', notes: 'Older Hampshire boar.' });
-  pig({ id: ID.ticker, tag: '26-14', name: 'Ticker', gender: 'male', stage: 'barrow', status: 'active', breed_id: ID.duroc, group_id: ID.show, weight_lb: 262, dob: '2026-04-12', entry_date: '2026-04-12', source: 'born', sire_id: ID.redford, dam_id: ID.clementine, litter_id: ID.litClem, ear_notch: '4-2', show_tag: '4412', notes: 'Aimed at 280 for the Cedar Valley Jackpot.' });
-  pig({ id: ID.sable, tag: '26-18', name: 'Sable', gender: 'male', stage: 'barrow', status: 'active', breed_id: ID.berkshire, group_id: ID.show, weight_lb: 210, dob: '2026-04-18', entry_date: '2026-04-18', source: 'born', sire_id: ID.boone, dam_id: ID.juniper, litter_id: ID.litJun, ear_notch: '4-6', show_tag: '4418', notes: 'Behind the gain he needs for November.' });
+  pig({ id: ID.ticker, tag: '26-14', name: 'Ticker', gender: 'male', stage: 'finisher', castrated: 1, status: 'active', breed_id: ID.duroc, group_id: ID.show, weight_lb: 262, dob: '2026-04-12', entry_date: '2026-04-12', source: 'born', sire_id: ID.redford, dam_id: ID.clementine, litter_id: ID.litClem, ear_notch: '4-2', show_tag: '4412', notes: 'Aimed at 280 for the Cedar Valley Jackpot.' });
+  pig({ id: ID.sable, tag: '26-18', name: 'Sable', gender: 'male', stage: 'finisher', castrated: 1, status: 'active', breed_id: ID.berkshire, group_id: ID.show, weight_lb: 210, dob: '2026-04-18', entry_date: '2026-04-18', source: 'born', sire_id: ID.boone, dam_id: ID.juniper, litter_id: ID.litJun, ear_notch: '4-6', show_tag: '4418', notes: 'Behind the gain he needs for November.' });
   pig({ id: ID.lark, tag: '26-7', name: 'Lark', gender: 'female', stage: 'gilt', status: 'active', breed_id: ID.yorkshire, group_id: ID.show, weight_lb: 268, dob: '2026-01-20', entry_date: '2026-01-20', source: 'born', sire_id: ID.redford, dam_id: ID.hazel, litter_id: ID.litHazelJan, ear_notch: '1-3', show_tag: '4407', notes: 'January gilt kept for the jackpot.' });
-  pig({ id: ID.matchstick, tag: '26-21', name: 'Matchstick', gender: 'male', stage: 'barrow', status: 'active', breed_id: ID.cross, group_id: ID.show, weight_lb: 248, dob: '2026-04-20', entry_date: '2026-05-02', source: 'purchased', sire_text: 'Shadow Oak Titan', dam_text: 'Unknown', show_tag: '4421', notes: 'Swollen knee after a pen move. On withdrawal.' });
+  pig({ id: ID.matchstick, tag: '26-21', name: 'Matchstick', gender: 'male', stage: 'finisher', castrated: 1, status: 'active', breed_id: ID.cross, group_id: ID.show, weight_lb: 248, dob: '2026-04-20', entry_date: '2026-05-02', source: 'purchased', sire_text: 'Shadow Oak Titan', dam_text: 'Unknown', show_tag: '4421', notes: 'Swollen knee after a pen move. On withdrawal.' });
   pig({ id: ID.button, tag: '26-3', name: 'Button', gender: 'female', stage: 'gilt', status: 'active', breed_id: ID.spotted, group_id: ID.show, weight_lb: 178, dob: '2026-05-01', entry_date: '2026-05-01', source: 'born', sire_id: ID.boone, dam_id: ID.willa, litter_id: ID.litWilla, ear_notch: '5-1', show_tag: '4503', notes: 'Later prospect for the December classic.' });
-  pig({ id: ID.pebble, tag: '26-31', name: 'Pebble', gender: 'female', stage: 'weaner', status: 'active', breed_id: ID.yorkshire, group_id: ID.nursery, weight_lb: 28, dob: '2026-09-22', entry_date: '2026-09-22', source: 'born', sire_id: ID.redford, dam_id: ID.hazel, litter_id: ID.litHazelSep, litter_number: 'H-5' });
-  pig({ id: ID.nim, tag: '26-32', name: 'Nim', gender: 'male', stage: 'barrow', status: 'active', breed_id: ID.yorkshire, group_id: ID.nursery, weight_lb: 26, dob: '2026-09-22', entry_date: '2026-09-22', source: 'born', sire_id: ID.redford, dam_id: ID.hazel, litter_id: ID.litHazelSep, litter_number: 'H-5', notes: 'Castrated October 5.' });
+  pig({ id: ID.pebble, tag: '26-31', name: 'Pebble', gender: 'female', stage: 'nursery', status: 'active', breed_id: ID.yorkshire, group_id: ID.nursery, weight_lb: 28, dob: '2026-09-22', entry_date: '2026-09-22', source: 'born', sire_id: ID.redford, dam_id: ID.hazel, litter_id: ID.litHazelSep, litter_number: 'H-5' });
+  pig({ id: ID.nim, tag: '26-32', name: 'Nim', gender: 'male', stage: 'nursery', castrated: 1, status: 'active', breed_id: ID.yorkshire, group_id: ID.nursery, weight_lb: 26, dob: '2026-09-22', entry_date: '2026-09-22', source: 'born', sire_id: ID.redford, dam_id: ID.hazel, litter_id: ID.litHazelSep, litter_number: 'H-5', notes: 'Castrated October 5. Still a nursery pig.' });
   pig({ id: ID.lost, tag: '26-40', name: null, gender: 'female', stage: 'piglet', status: 'dead', breed_id: ID.yorkshire, group_id: ID.nursery, weight_lb: 3, dob: '2026-09-22', entry_date: '2026-09-22', source: 'born', sire_id: ID.redford, dam_id: ID.hazel, litter_id: ID.litHazelSep, litter_number: 'H-5' });
   pig({ id: ID.marigold, tag: '24-11', name: 'Marigold', gender: 'female', stage: 'gilt', status: 'sold', breed_id: ID.yorkshire, group_id: ID.gilts, weight_lb: 215, dob: '2025-02-02', entry_date: '2025-02-02', source: 'born', sire_id: ID.redford, dam_id: ID.hazel, notes: 'Sold to Priya Shah for a 4-H project.' });
-  pig({ id: ID.stub, tag: '25-2', name: 'Stub', gender: 'male', stage: 'barrow', status: 'culled', breed_id: ID.cross, group_id: ID.barrows, weight_lb: 190, dob: '2025-03-11', entry_date: '2025-03-11', source: 'born', notes: 'Culled for a hernia.' });
+  pig({ id: ID.stub, tag: '25-2', name: 'Stub', gender: 'male', stage: 'finisher', castrated: 1, status: 'culled', breed_id: ID.cross, group_id: ID.barrows, weight_lb: 190, dob: '2025-03-11', entry_date: '2025-03-11', source: 'born', notes: 'Culled for a hernia.' });
 
   const litter = (row: Record<string, SqlValue>) =>
     add('litters', {
@@ -491,14 +492,14 @@ export function buildSeed(today: string): SeedRow[] {
   move(seedId(830), { feed_type_id: ID.feedNursery, movement: 'reduction', move_date: '2026-09-01', quantity: 100, remark: 'consumed' });
 
   add('shows', { id: ID.showFair, farm_id: ID.farm, name: 'County fair prospect show', show_date: day('2026-08-08'), location: 'County fairgrounds', target_weight_lb: 260, notes: 'Ticker stood third.', ...audit('2026-07-01') });
-  add('shows', { id: ID.showJackpot, farm_id: ID.farm, name: 'Cedar Valley Jackpot', show_date: day('2026-11-14'), location: 'Cedar Rapids', target_weight_lb: 270, notes: 'Main jackpot for the show string.', ...audit('2026-09-01') });
+  add('shows', { id: ID.showJackpot, farm_id: ID.farm, name: 'Cedar Valley Jackpot', show_date: day('2026-11-14'), location: 'Cedar Rapids', target_weight_lb: 280, notes: 'Main jackpot for the show string. Target matches the barrow and gilt entries.', ...audit('2026-09-01') });
   add('shows', { id: ID.showWinter, farm_id: ID.farm, name: 'Winter Classic', show_date: day('2026-12-12'), location: 'Des Moines', target_weight_lb: 250, notes: 'Later gilt show.', ...audit('2026-09-15') });
 
   const entry = (id: string, row: Record<string, SqlValue>) =>
     add('show_entries', { id, farm_id: ID.farm, exhibitor: 'CG Ranch', class_name: null, target_weight_lb: null, weigh_in_lb: null, placing: null, premium_cents: null, ...audit('2026-09-01'), ...row });
   entry(seedId(901), { show_id: ID.showFair, pig_id: ID.ticker, class_name: 'Barrow', target_weight_lb: 260, weigh_in_lb: 175, placing: '3rd', premium_cents: 8000 });
   entry(seedId(902), { show_id: ID.showJackpot, pig_id: ID.ticker, class_name: 'Barrow', target_weight_lb: 280 });
-  entry(seedId(903), { show_id: ID.showJackpot, pig_id: ID.sable, class_name: 'Barrow', target_weight_lb: 270 });
+  entry(seedId(903), { show_id: ID.showJackpot, pig_id: ID.sable, class_name: 'Barrow', target_weight_lb: 280 });
   entry(seedId(904), { show_id: ID.showJackpot, pig_id: ID.lark, class_name: 'Gilt', target_weight_lb: 280 });
   entry(seedId(905), { show_id: ID.showWinter, pig_id: ID.button, class_name: 'Gilt', target_weight_lb: 245 });
 

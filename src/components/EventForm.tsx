@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { can, expectedFarrowDate, heatCheckDate, saleBlockReason, activeWithdrawals } from '@/domain/herd';
+import { can, expectedFarrowDate, heatCheckDate, planBreedingHeat, saleBlockReason, activeWithdrawals } from '@/domain/herd';
 import { centsFromDollars, dollarsInput, parseNumber } from '@/domain/format';
 import { prettyDate, todayISO } from '@/domain/dates';
 import { EVENT_LABELS } from '@/domain/labels';
@@ -66,6 +66,12 @@ export function blankEvent(pigId = '', eventType = 'weight', eventDate = todayIS
     treatedBy: '',
     vetName: '',
     vfdNumber: '',
+    lotNo: '',
+    productExpiry: null,
+    eldu: false,
+    elduVet: '',
+    vfdExpiry: null,
+    vfdDocUri: '',
     vaccineName: '',
     nextDueDate: null,
     buyerId: null,
@@ -108,6 +114,12 @@ export function eventToInput(event: HerdEvent, litter?: Litter | null): EventInp
     treatedBy: event.treatedBy || '',
     vetName: event.vetName || '',
     vfdNumber: event.vfdNumber || '',
+    lotNo: event.lotNo || '',
+    productExpiry: event.productExpiry,
+    eldu: Boolean(event.eldu),
+    elduVet: event.elduVet || '',
+    vfdExpiry: event.vfdExpiry,
+    vfdDocUri: event.vfdDocUri || '',
     vaccineName: event.vaccineName || '',
     nextDueDate: event.nextDueDate,
     buyerId: event.buyerId,
@@ -151,8 +163,32 @@ export function EventForm({
   const boars = snap.pigs.filter((row) => row.gender === 'male' && row.id !== form.pigId);
   const block = useMemo(() => {
     if (type !== 'sale' || !form.pigId) return null;
-    return saleBlockReason(activeWithdrawals(snap.events.filter((event) => event.id !== eventId), form.pigId, todayISO()));
-  }, [type, form.pigId, snap.events, eventId]);
+    return saleBlockReason(
+      activeWithdrawals(snap.events.filter((event) => event.id !== eventId), form.pigId, form.eventDate || todayISO()),
+    );
+  }, [type, form.pigId, form.eventDate, snap.events, eventId]);
+  const heatPlan = useMemo(() => {
+    if (type !== 'breeding' || !form.pigId || !form.eventDate || eventId) return null;
+    return planBreedingHeat({
+      pigId: form.pigId,
+      serviceDate: form.eventDate,
+      newId: 'new-service',
+      gestationDays: snap.farm.gestationDays,
+      services: snap.events
+        .filter((event) => event.eventType === 'breeding' && event.pigId === form.pigId)
+        .map((event) => ({ id: event.id, pigId: event.pigId, eventDate: event.eventDate, heatId: event.heatId })),
+      outcomes: snap.events
+        .filter((event) => event.pigId === form.pigId)
+        .map((event) => ({
+          id: event.id,
+          pigId: event.pigId,
+          eventType: event.eventType,
+          eventDate: event.eventDate,
+          breedingEventId: event.breedingEventId,
+          pregResult: event.pregResult,
+        })),
+    });
+  }, [type, form.pigId, form.eventDate, eventId, snap.events, snap.farm.gestationDays]);
 
   const due = type === 'breeding' && form.eventDate ? expectedFarrowDate(form.eventDate, snap.farm.gestationDays) : null;
   const heat = type === 'breeding' && form.eventDate ? heatCheckDate(form.eventDate, snap.farm.heatCycleDays) : null;
@@ -205,7 +241,13 @@ export function EventForm({
           {due ? (
             <Notice
               tone="info"
-              text={`Expected farrow ${prettyDate(due)} (${snap.farm.gestationDays} days). Heat check around ${prettyDate(heat)}. Open breedings follow the current farm gestation if you change it later.`}
+              text={
+                heatPlan && heatPlan.heatId !== 'new-service'
+                  ? `This joins the open heat. Due date stays ${prettyDate(heatPlan.dueDate)}, from the first service.`
+                  : heatPlan && heatPlan.returnedServiceIds.length
+                    ? `This closes the earlier service as a return to heat. Expected farrow ${prettyDate(heatPlan.dueDate)} (${snap.farm.gestationDays} days).`
+                    : `Expected farrow ${prettyDate(due)} (${snap.farm.gestationDays} days). Return-to-heat check around ${prettyDate(heat)}. A repeat within 5 days stays on this heat.`
+              }
             />
           ) : null}
         </View>
@@ -255,10 +297,10 @@ export function EventForm({
         <Fields>
           <Field label="Born alive" value={born} onChange={setBorn} />
           <Field label="Stillborn" value={still} onChange={setStill} />
-          <Field label="Mummies" value={mummies} onChange={setMummies} />
+          <Field label="Mummified" value={mummies} onChange={setMummies} />
           <Field label="Litter birth weight (lb)" value={birthWeight} onChange={setBirthWeight} />
           <Field label="Litter number" value={form.litterNumber} onChange={(litterNumber) => set({ litterNumber })} />
-          <Field label="Parity" value={parity} onChange={setParity} />
+          <Field label="Parity (blank uses recorded farrowings)" value={parity} onChange={setParity} />
         </Fields>
       ) : null}
 
@@ -281,8 +323,8 @@ export function EventForm({
           value={form.markBarrow ? 'barrow' : 'keep'}
           onChange={(value) => set({ markBarrow: value === 'barrow' })}
           options={[
-            { value: 'barrow', label: 'Mark this pig as a barrow' },
-            { value: 'keep', label: 'Leave the stage unchanged' },
+            { value: 'barrow', label: 'Castrated. A boar moves to finisher; a piglet moves to nursery.' },
+            { value: 'keep', label: 'Castrated, and keep the current stage' },
           ]}
         />
       ) : null}
@@ -304,21 +346,38 @@ export function EventForm({
         </Fields>
       ) : null}
 
-      {type === 'treatment' || type === 'deworming' || type === 'vaccination' ? (
+      {type === 'treatment' || type === 'deworming' || type === 'vaccination' || type === 'herd_spray' || type === 'other' ? (
         <View style={{ gap: 12 }}>
-          <Text style={ui.small}>Record what the ranch gave. Herdkeep does not suggest a dose.</Text>
+          <Text style={ui.small}>
+            Record what the ranch gave. Herdkeep does not suggest a dose. Any withdrawal days hold the pig, including sprays. Keep VFD copies for 2 years. The pig is clear the day after the withdrawal ends.
+          </Text>
           <Fields>
             {type === 'vaccination' ? (
               <Field label="Vaccine" value={form.vaccineName} onChange={(vaccineName) => set({ vaccineName })} />
-            ) : (
+            ) : type === 'treatment' || type === 'deworming' ? (
               <Field label="Product" value={form.drugName} onChange={(drugName) => set({ drugName })} />
-            )}
+            ) : null}
+            <Field label="Lot number" value={form.lotNo} onChange={(lotNo) => set({ lotNo })} />
+            <DateField label="Product expiry" value={form.productExpiry || ''} onChange={(productExpiry) => set({ productExpiry: productExpiry || null })} />
             <Field label="Dose recorded" value={form.dose} onChange={(dose) => set({ dose })} />
-            <Field label="Route" value={form.route} onChange={(route) => set({ route })} placeholder="IM, oral…" />
+            <Field label="Route" value={form.route} onChange={(route) => set({ route })} placeholder="IM, oral, pour-on…" />
             <Field label="Withdrawal days" value={holdDays} onChange={setHoldDays} />
+            <Select
+              label="Extra-label use"
+              value={form.eldu ? 'yes' : 'no'}
+              onChange={(value) => set({ eldu: value === 'yes' })}
+              options={[
+                { value: 'no', label: 'Label use' },
+                { value: 'yes', label: 'Extra-label (ELDU)' },
+              ]}
+            />
+            {form.eldu ? <Field label="ELDU veterinarian" value={form.elduVet} onChange={(elduVet) => set({ elduVet })} /> : null}
             <DateField label="Next due" value={form.nextDueDate || ''} onChange={(nextDueDate) => set({ nextDueDate: nextDueDate || null })} />
             <Field label="Given by" value={form.treatedBy} onChange={(treatedBy) => set({ treatedBy })} />
             <Field label="Veterinarian" value={form.vetName} onChange={(vetName) => set({ vetName })} />
+            <Field label="VFD number" value={form.vfdNumber} onChange={(vfdNumber) => set({ vfdNumber })} />
+            <DateField label="VFD expiry" value={form.vfdExpiry || ''} onChange={(vfdExpiry) => set({ vfdExpiry: vfdExpiry || null })} />
+            <Field label="VFD document link" value={form.vfdDocUri} onChange={(vfdDocUri) => set({ vfdDocUri })} placeholder="File name or URL" />
             <Field label="Diagnosis" value={form.diagnosis} onChange={(diagnosis) => set({ diagnosis })} />
           </Fields>
         </View>
@@ -335,7 +394,7 @@ export function EventForm({
         </View>
       ) : null}
 
-      {type === 'death' || type === 'cull' ? <Field label="Cause" value={form.cause} onChange={(cause) => set({ cause })} /> : null}
+      {type === 'death' || type === 'cull' ? <Field label="Cause (required)" value={form.cause} onChange={(cause) => set({ cause })} placeholder="Why this pig left" /> : null}
 
       {type === 'other' || type === 'hoof_trim' || type === 'tagging' || type === 'herd_spray' || type === 'dry_off' || type === 'foster' ? (
         <Field label="Name" value={form.customName} onChange={(customName) => set({ customName })} />
@@ -344,7 +403,7 @@ export function EventForm({
       <Field label="Notes" value={form.notes} onChange={(notes) => set({ notes })} multiline />
       <Button
         label={busy ? 'Saving…' : eventId ? 'Save event' : 'Add event'}
-        disabled={busy || !can(snap.actor.role, 'write')}
+        disabled={busy || !can(snap.actor.role, 'write') || Boolean(block)}
         onPress={() => {
           const next: EventInput = {
             ...form,

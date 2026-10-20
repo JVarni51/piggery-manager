@@ -2,15 +2,21 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { toCsv } from './csv';
 import { addDays, diffDays, rangeFor, shiftDate } from './dates';
+import { compareNatural } from './format';
 import {
   activeWithdrawals,
+  averageBreedingFemales,
   can,
+  clusterHeats,
   expectedFarrowDate,
   herdKpis,
   isSelfOrDescendant,
   lifetimeAdg,
   moneyBuckets,
   parentAgeProblem,
+  parityForFarrow,
+  pigsOnSow,
+  planBreedingHeat,
   preweanMortality,
   recentAdg,
   saleBlockReason,
@@ -73,6 +79,7 @@ describe('weights, pace, withdrawal', () => {
           id: 't1',
           pigId: 'p1',
           eventType: 'treatment',
+          eventDate: '2026-10-14',
           withdrawalEnds: '2026-10-28',
           drugName: 'Penicillin G procaine',
         },
@@ -83,6 +90,29 @@ describe('weights, pace, withdrawal', () => {
     assert.match(saleBlockReason(hits) || '', /not sale-ready/);
     assert.equal(showEntryBlock(hits, '2026-11-14').block, null);
     assert.ok(showEntryBlock(hits, '2026-10-25').block);
+  });
+
+  it('holds a sale on the sale date, including sprays, and clears the next day', () => {
+    const events = [
+      {
+        id: 'spray',
+        pigId: 'p1',
+        eventType: 'herd_spray',
+        eventDate: '2026-10-01',
+        withdrawalEnds: '2026-10-15',
+        drugName: null,
+        customName: 'Pour-on',
+      },
+    ];
+    const during = activeWithdrawals(events, 'p1', '2026-10-10');
+    const onEnd = activeWithdrawals(events, 'p1', '2026-10-15');
+    const clear = activeWithdrawals(events, 'p1', '2026-10-16');
+    const beforeTreatment = activeWithdrawals(events, 'p1', '2026-09-20');
+    assert.match(saleBlockReason(during) || '', /not sale-ready until 2026-10-16/);
+    assert.ok(saleBlockReason(onEnd));
+    assert.equal(saleBlockReason(clear), null);
+    assert.equal(beforeTreatment.length, 0);
+    assert.equal(showEntryBlock(activeWithdrawals(events, 'p1', '2026-10-20'), '2026-10-20').block, null);
   });
 });
 
@@ -152,7 +182,92 @@ describe('litters and herd KPIs', () => {
     assert.equal(kpis.farrowingRate, 2 / 3);
     assert.equal(kpis.preweanMortality, 1 / 18);
     assert.equal(kpis.weanedPerLitter, 8.5);
+    assert.equal(kpis.npdEstimated, true);
     assert.ok(kpis.npd != null && kpis.npd > 0);
+    assert.equal(kpis.sowCount, 2);
+  });
+
+  it('ignores litters that are not weaned and counts a repeat service as one heat', () => {
+    const kpis = herdKpis({
+      today: '2026-10-20',
+      gestationDays: 114,
+      weaningAgeDays: 21,
+      pigs: [{ id: 's1', stage: 'sow', status: 'active' }],
+      litters: [
+        {
+          id: 'weaned',
+          sowId: 's1',
+          farrowDate: '2026-04-01',
+          bornAlive: 10,
+          stillborn: 0,
+          mummies: 0,
+          weanedCount: 8,
+          weanDate: '2026-04-29',
+        },
+        {
+          id: 'open',
+          sowId: 's1',
+          farrowDate: '2026-09-01',
+          bornAlive: 12,
+          stillborn: 0,
+          mummies: 0,
+          weanedCount: null,
+          weanDate: null,
+        },
+      ],
+      fosters: [],
+      breedings: [
+        { id: 'a', pigId: 's1', eventDate: '2025-12-08' },
+        { id: 'b', pigId: 's1', eventDate: '2025-12-09', heatId: 'a' },
+      ],
+      outcomes: [
+        { id: 'f', pigId: 's1', eventType: 'farrowing', eventDate: '2026-04-01', breedingEventId: 'a', pregResult: null },
+      ],
+    });
+    assert.equal(kpis.preweanMortality, 2 / 10);
+    assert.equal(kpis.matings, 1);
+    assert.equal(kpis.farrowed, 1);
+    assert.equal(kpis.farrowingRate, 1);
+    assert.equal(kpis.lactationDays, 28);
+  });
+
+  it('uses average breeding-female days and closes a return to heat', () => {
+    const from = addDays('2026-10-20', -364);
+    const left = addDays(from, 182);
+    const average = averageBreedingFemales(
+      [{ id: 's1', stage: 'sow', status: 'sold', gender: 'female', entryDate: from, leftOn: left }],
+      [],
+      from,
+      '2026-10-20',
+    );
+    assert.ok(average > 0.45 && average < 0.55);
+    const plan = planBreedingHeat({
+      pigId: 's1',
+      serviceDate: '2026-10-22',
+      newId: 'second',
+      gestationDays: 114,
+      services: [{ id: 'first', pigId: 's1', eventDate: '2026-10-01', heatId: null }],
+      outcomes: [],
+    });
+    assert.deepEqual(plan.returnedServiceIds, ['first']);
+    assert.equal(plan.heatId, 'second');
+    const heats = clusterHeats([
+      { id: 'first', pigId: 's1', eventDate: '2026-10-01' },
+      { id: 'repeat', pigId: 's1', eventDate: '2026-10-02' },
+    ]);
+    assert.equal(heats.length, 1);
+    assert.equal(parityForFarrow(['2026-01-01', '2026-08-01'], '2026-08-01'), 2);
+    const litter = {
+      id: 'L',
+      sowId: 'S',
+      farrowDate: '2026-04-01',
+      bornAlive: 10,
+      stillborn: 1,
+      mummies: 0,
+      weanedCount: 9,
+      weanDate: '2026-04-22',
+    };
+    assert.equal(pigsOnSow(litter, []), 0);
   });
 });
 
@@ -196,6 +311,11 @@ describe('money, stock, pedigree guards, roles', () => {
     assert.equal(isSelfOrDescendant('sow', 'gilt', family), true);
     assert.equal(isSelfOrDescendant('gilt', 'boar', family), false);
     assert.equal(parentAgeProblem('2026-04-12', '2026-05-01'), 'A parent has to be born before this pig.');
+  });
+
+  it('sorts tags in numeric order', () => {
+    const tags = ['26-7', '4-9', '11-8', '26-14', '7-1'];
+    assert.deepEqual([...tags].sort(compareNatural), ['4-9', '7-1', '11-8', '26-7', '26-14']);
   });
 
   it('keeps data entry from deleting', () => {

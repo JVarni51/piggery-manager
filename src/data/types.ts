@@ -73,6 +73,7 @@ export type Pig = {
   showTag: string | null;
   registrationNo: string | null;
   litterId: string | null;
+  castrated: number;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -153,6 +154,13 @@ export type HerdEvent = {
   treatedBy: string | null;
   vetName: string | null;
   vfdNumber: string | null;
+  lotNo: string | null;
+  productExpiry: string | null;
+  eldu: number | null;
+  elduVet: string | null;
+  vfdExpiry: string | null;
+  vfdDocUri: string | null;
+  heatId: string | null;
   vaccineName: string | null;
   nextDueDate: string | null;
   buyerId: string | null;
@@ -178,6 +186,12 @@ export type MassEvent = {
   customName: string | null;
   notes: string | null;
   withdrawalDays: number | null;
+  lotNo: string | null;
+  productExpiry: string | null;
+  eldu: number | null;
+  elduVet: string | null;
+  vfdExpiry: string | null;
+  vfdDocUri: string | null;
   costCents: number | null;
   expenseId: string | null;
   createdAt: string;
@@ -265,6 +279,13 @@ export type ShowEntry = {
   weighInLb: number | null;
   placing: string | null;
   premiumCents: number | null;
+  division: string | null;
+  weightClass: string | null;
+  exhibitorContactId: string | null;
+  buyerContactId: string | null;
+  saleCents: number | null;
+  addonCents: number | null;
+  saleEventId: string | null;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
@@ -302,6 +323,7 @@ export type PigInput = {
   showTag: string;
   registrationNo: string;
   litterId: string | null;
+  castrated: boolean;
 };
 
 export type EventInput = {
@@ -336,6 +358,12 @@ export type EventInput = {
   treatedBy: string;
   vetName: string;
   vfdNumber: string;
+  lotNo: string;
+  productExpiry: string | null;
+  eldu: boolean;
+  elduVet: string;
+  vfdExpiry: string | null;
+  vfdDocUri: string;
   vaccineName: string;
   nextDueDate: string | null;
   buyerId: string | null;
@@ -355,6 +383,12 @@ export type MassInput = {
   customName: string;
   notes: string;
   withdrawalDays: number | null;
+  lotNo: string;
+  productExpiry: string | null;
+  eldu: boolean;
+  elduVet: string;
+  vfdExpiry: string | null;
+  vfdDocUri: string;
   costCents: number | null;
 };
 
@@ -398,6 +432,14 @@ export type EntryInput = {
   exhibitor: string;
   className: string;
   targetWeightLb: number | null;
+  division?: string;
+  weightClass?: string;
+  exhibitorContactId?: string | null;
+  buyerContactId?: string | null;
+  saleCents?: number | null;
+  addonCents?: number | null;
+  weighInLb?: number | null;
+  saleEventId?: string | null;
 };
 
 export type FosterInput = {

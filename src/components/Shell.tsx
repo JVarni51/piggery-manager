@@ -3,7 +3,7 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { roleLabel } from '@/domain/herd';
-import { EVENT_LABELS } from '@/domain/labels';
+import { EVENT_LABELS, STAGE_LABELS } from '@/domain/labels';
 import { money } from '@/domain/format';
 import { useHerd } from '@/data/context';
 import { pigLabel, searchHerd } from '@/lib/view';
@@ -47,6 +47,12 @@ export function Shell({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false);
   const [fab, setFab] = useState<Fab>(null);
   const path = usePathname();
+  const { flash, clearFlash } = useHerd();
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => clearFlash(), 2500);
+    return () => clearTimeout(timer);
+  }, [flash, clearFlash]);
 
   return (
     <FabContext.Provider value={setFab}>
@@ -54,6 +60,11 @@ export function Shell({ children }: { children: ReactNode }) {
         {!narrow ? <Sidebar path={path} onNavigate={() => undefined} /> : null}
         <View style={{ flex: 1 }}>
           <TopBar menuOpen={menu} onMenu={() => setMenu(true)} topInset={insets.top} />
+          {flash ? (
+            <View style={{ backgroundColor: colors.moss, paddingVertical: 10, paddingHorizontal: 16 }}>
+              <Text style={{ color: colors.white, fontFamily: sans, fontWeight: '700' }}>{flash}</Text>
+            </View>
+          ) : null}
           <View style={{ flex: 1 }}>{children}</View>
           {narrow && fab ? <Sticky href={fab.href} label={fab.label} bottom={64 + insets.bottom} /> : null}
         </View>
@@ -148,7 +159,7 @@ function TopBar({ onMenu, menuOpen, topInset }: { onMenu: () => void; menuOpen: 
             <Hit
               key={pig.id}
               title={pigLabel(pig)}
-              meta={pig.stage}
+              meta={STAGE_LABELS[pig.stage] || pig.stage}
               onPress={() => {
                 setOpen(false);
                 setQuery('');

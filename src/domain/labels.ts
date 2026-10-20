@@ -22,12 +22,34 @@ export const EVENT_LABELS: Record<string, string> = {
 
 export const STAGE_LABELS: Record<string, string> = {
   piglet: 'Piglet',
-  weaner: 'Weaner',
+  nursery: 'Nursery',
+  weaner: 'Nursery',
+  grower: 'Grower',
+  finisher: 'Finisher',
   gilt: 'Gilt',
   sow: 'Sow',
   boar: 'Boar',
   barrow: 'Barrow',
 };
+
+export const SOURCE_LABELS: Record<string, string> = {
+  born: 'Born here',
+  purchased: 'Purchased',
+  other: 'Other',
+};
+
+export function sourceLabel(source: string, detail?: string | null): string {
+  const label = SOURCE_LABELS[source] || source.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return detail ? `${label} · ${detail}` : label;
+}
+
+export function roleWord(pig: { gender: string; stage: string; castrated?: number | boolean | null }, parity: number): string | null {
+  if (pig.gender === 'male' && (pig.castrated || pig.stage === 'barrow')) return 'Barrow';
+  if (pig.gender === 'male' && pig.stage === 'boar') return 'Boar';
+  if (pig.gender === 'female' && (pig.stage === 'sow' || (pig.stage === 'gilt' && parity >= 1))) return 'Sow';
+  if (pig.gender === 'female' && pig.stage === 'gilt') return 'Gilt';
+  return null;
+}
 
 export const STATUS_LABELS: Record<string, string> = {
   active: 'Active',
@@ -63,7 +85,7 @@ export function eventSummary(event: {
   }
   if (type === 'pregnancy_check') return event.pregResult ? `Result: ${event.pregResult}` : 'Pregnancy check';
   if (type === 'farrowing') {
-    return `Born alive ${event.bornAlive ?? 0}, stillborn ${event.stillborn ?? 0}, mummies ${event.mummies ?? 0}`;
+    return `Born alive ${event.bornAlive ?? 0}, stillborn ${event.stillborn ?? 0}, mummified ${event.mummies ?? 0}`;
   }
   if (type === 'weaning') return `Weaned ${event.weanedCount ?? 0}`;
   if (type === 'weight') return event.weightLb != null ? `${event.weightLb} lb` : 'Weight';

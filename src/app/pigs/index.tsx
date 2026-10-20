@@ -3,13 +3,15 @@ import { Pressable, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { can } from '@/domain/herd';
 import { STAGE_LABELS, STATUS_LABELS } from '@/domain/labels';
-import { pounds } from '@/domain/format';
-import { ageLabel, named, oneParam, pigLabel } from '@/lib/view';
+import { compareNatural, pounds } from '@/domain/format';
+import { toCsv } from '@/domain/csv';
+import { ageLabel, cleanParams, named, oneParam, pigLabel } from '@/lib/view';
+import { downloadText } from '@/lib/download';
 import { colors, sans } from '@/theme';
 import { Gate } from '@/components/Gate';
 import { useStickyAdd } from '@/components/Shell';
 import { useSave } from '@/components/useSave';
-import { Badge, Button, Card, Field, Filters, Notice, Page, Select, StackList } from '@/components/ui';
+import { Badge, Button, Card, Field, Filters, Notice, Page, Select, StackList, useNarrow } from '@/components/ui';
 
 export default function PigsPage() {
   return (
@@ -21,49 +23,86 @@ export default function PigsPage() {
 
 function Pigs({ snap }: { snap: import('@/data/types').Snapshot }) {
   const router = useRouter();
-  const params = useLocalSearchParams<{ stage?: string; status?: string }>();
+  const { narrow } = useNarrow();
+  const params = useLocalSearchParams<{ stage?: string; status?: string; q?: string; sex?: string; breed?: string; group?: string }>();
   const { error, busy, submit } = useSave();
-  const [q, setQ] = useState('');
-  const [gender, setGender] = useState('');
-  const [breed, setBreed] = useState('');
-  const [group, setGroup] = useState('');
-  const [status, setStatus] = useState(oneParam(params.status));
-  const [stage, setStage] = useState(oneParam(params.stage));
+  const q = oneParam(params.q);
+  const gender = oneParam(params.sex);
+  const breed = oneParam(params.breed);
+  const group = oneParam(params.group);
+  const status = oneParam(params.status) || 'active';
+  const stage = oneParam(params.stage);
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const [moveTo, setMoveTo] = useState('');
   const writable = can(snap.actor.role, 'write');
   useStickyAdd(writable ? { label: 'Add pig', href: '/pigs/new' } : null);
 
+  function setQuery(patch: Record<string, string | null>) {
+    const next = cleanParams(params, patch);
+    if ((next.status || 'active') === 'active') delete next.status;
+    router.replace({ pathname: '/pigs', params: next });
+  }
+
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return snap.pigs.filter((pig) => {
-      if (gender && pig.gender !== gender) return false;
-      if (breed && pig.breedId !== breed) return false;
-      if (group && pig.groupId !== group) return false;
-      if (status && pig.status !== status) return false;
-      if (stage && pig.stage !== stage) return false;
-      if (!needle) return true;
-      return [pig.tag, pig.name, pig.earNotch, pig.showTag].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
-    });
+    return snap.pigs
+      .filter((pig) => {
+        if (gender && pig.gender !== gender) return false;
+        if (breed && pig.breedId !== breed) return false;
+        if (group && pig.groupId !== group) return false;
+        if (status !== 'any' && pig.status !== status) return false;
+        if (stage && pig.stage !== stage) return false;
+        if (!needle) return true;
+        return [pig.tag, pig.name, pig.earNotch, pig.showTag].filter(Boolean).some((value) => String(value).toLowerCase().includes(needle));
+      })
+      .sort((a, b) => compareNatural(a.tag, b.tag) || a.id.localeCompare(b.id));
   }, [snap.pigs, q, gender, breed, group, status, stage]);
 
-  const filtersOn = [gender, breed, group, status, stage, q].filter(Boolean).length;
+  const filtersOn = [gender, breed, group, status === 'active' ? '' : status, stage, q].filter(Boolean).length;
 
   return (
     <Page
       title="Pigs"
       lede={`${rows.length} showing of ${snap.pigs.length} on the farm.`}
-      action={writable ? <Button label="Add pig" onPress={() => router.push('/pigs/new')} /> : null}
+      action={
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <Button
+            tone="secondary"
+            label="Download CSV"
+            onPress={() => {
+              void downloadText(
+                'herdkeep-pigs.csv',
+                toCsv(
+                  ['Tag', 'Name', 'Sex', 'Stage', 'Status', 'Castrated', 'Breed', 'Group', 'Weight', 'Born'],
+                  rows.map((pig) => [
+                    pig.tag,
+                    pig.name,
+                    pig.gender,
+                    STAGE_LABELS[pig.stage] || pig.stage,
+                    STATUS_LABELS[pig.status] || pig.status,
+                    pig.castrated ? 'yes' : 'no',
+                    named(snap.breeds, pig.breedId),
+                    named(snap.groups, pig.groupId),
+                    pig.weightLb,
+                    pig.dob,
+                  ]),
+                ),
+              );
+            }}
+          />
+          {writable && !narrow ? <Button label="Add pig" onPress={() => router.push('/pigs/new')} /> : null}
+        </View>
+      }
     >
       {error ? <Notice tone="bad" text={error} /> : null}
-      <Field label="Search" value={q} onChange={setQ} placeholder="Tag or name" />
+      <Field label="Search" value={q} onChange={(value) => setQuery({ q: value })} placeholder="Tag or name" />
       <Filters count={filtersOn}>
-        <Select label="Sex" value={gender} onChange={setGender} options={[{ value: '', label: 'Any' }, { value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }]} />
-        <Select label="Breed" value={breed} onChange={setBreed} options={[{ value: '', label: 'Any' }, ...snap.breeds.map((row) => ({ value: row.id, label: row.name }))]} />
-        <Select label="Group" value={group} onChange={setGroup} options={[{ value: '', label: 'Any' }, ...snap.groups.map((row) => ({ value: row.id, label: row.name }))]} />
-        <Select label="Stage" value={stage} onChange={setStage} options={[{ value: '', label: 'Any' }, ...Object.entries(STAGE_LABELS).map(([value, label]) => ({ value, label }))]} />
-        <Select label="Status" value={status} onChange={setStatus} options={[{ value: '', label: 'Any' }, ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }))]} />
+        <Select label="Sex" value={gender} onChange={(value) => setQuery({ sex: value })} options={[{ value: '', label: 'Any' }, { value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }]} />
+        <Select label="Breed" value={breed} onChange={(value) => setQuery({ breed: value })} options={[{ value: '', label: 'Any' }, ...snap.breeds.map((row) => ({ value: row.id, label: row.name }))]} />
+        <Select label="Group" value={group} onChange={(value) => setQuery({ group: value })} options={[{ value: '', label: 'Any' }, ...snap.groups.map((row) => ({ value: row.id, label: row.name }))]} />
+        <Select label="Stage" value={stage} onChange={(value) => setQuery({ stage: value })} options={[{ value: '', label: 'Any' }, ...Object.entries(STAGE_LABELS).filter(([value]) => value !== 'weaner').map(([value, label]) => ({ value, label }))]} />
+        <Select label="Status" value={status} onChange={(value) => setQuery({ status: value === 'active' ? null : value })} options={[{ value: 'active', label: 'Active' }, { value: 'any', label: 'Any' }, ...Object.entries(STATUS_LABELS).filter(([value]) => value !== 'active').map(([value, label]) => ({ value, label }))]} />
       </Filters>
       {writable ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>

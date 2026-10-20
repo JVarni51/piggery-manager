@@ -4,7 +4,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { can } from '@/domain/herd';
 import { prettyDate, todayISO } from '@/domain/dates';
 import { adgLabel, pounds } from '@/domain/format';
-import { EVENT_LABELS, STAGE_LABELS, STATUS_LABELS } from '@/domain/labels';
+import { EVENT_LABELS, STAGE_LABELS, STATUS_LABELS, roleWord, sourceLabel } from '@/domain/labels';
+import { WeightChart } from '@/components/Charts';
 import { eventSummary } from '@/domain/labels';
 import { ageLabel, named, oneParam, pigLabel, pigSummary } from '@/lib/view';
 import { colors, sans, ui } from '@/theme';
@@ -69,7 +70,7 @@ function Detail({ pigId }: { pigId: string }) {
         return (
           <Page
             title={pigLabel(pig)}
-            lede={`${STAGE_LABELS[pig.stage]} · ${ageLabel(pig.dob)} · ${named(snap.breeds, pig.breedId)}`}
+            lede={`${roleWord(pig, summary.parity) ? `${roleWord(pig, summary.parity)} · ` : ''}${STAGE_LABELS[pig.stage] || pig.stage} · ${ageLabel(pig.dob)} · ${named(snap.breeds, pig.breedId)}`}
             action={<Button label="Edit" tone="secondary" onPress={() => router.push(`/pigs/${pig.id}/edit`)} />}
           >
             {error ? <Notice tone="bad" text={error} /> : null}
@@ -85,7 +86,8 @@ function Detail({ pigId }: { pigId: string }) {
                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                   <Badge label={STATUS_LABELS[pig.status] || pig.status} tone={pig.status === 'active' ? 'good' : 'warn'} />
                   <Badge label={pig.gender === 'female' ? 'Female' : 'Male'} tone="info" />
-                  {summary.holds[0] ? <Badge label={`Hold until ${summary.holds[0].ends}`} tone="bad" /> : null}
+                  {pig.castrated ? <Badge label="Castrated" tone="neutral" /> : null}
+                  {summary.holds[0] ? <Badge label={`Not clear until ${summary.holds[0].ends}`} tone="bad" /> : null}
                 </View>
                 <Text style={ui.small}>Updated {prettyDate(pig.updatedAt.slice(0, 10))}{pig.updatedBy ? ` by ${pig.updatedBy}` : ''}.</Text>
               </View>
@@ -97,7 +99,11 @@ function Detail({ pigId }: { pigId: string }) {
               <Line k="Parity" v={String(summary.parity)} />
               <Line k="Last weight" v={summary.lastWeight ? `${pounds(summary.lastWeight.lb, 1)} on ${prettyDate(summary.lastWeight.date)}` : pounds(pig.weightLb, 1)} />
               <Line k="Recent gain" v={adgLabel(summary.adg)} />
-              {summary.holds[0] ? <Line k="Withdrawal" v={`${summary.holds[0].drug} clears ${prettyDate(summary.holds[0].ends)}`} /> : null}
+              {summary.holds[0] ? (
+                <Line k="Withdrawal" v={`${summary.holds[0].drug} runs through ${prettyDate(summary.holds[0].ends)}. Clear the next day.`} />
+              ) : null}
+              <Text style={[ui.label, { marginTop: 8 }]}>Weight history</Text>
+              <WeightChart points={summary.weights} />
             </Card>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <Pressable onPress={() => setTab('record')} style={tabBtn(tab === 'record')}><Text style={tabText(tab === 'record')}>Record</Text></Pressable>
@@ -108,7 +114,7 @@ function Detail({ pigId }: { pigId: string }) {
                 <Line k="Group" v={named(snap.groups, pig.groupId)} />
                 <Line k="Born" v={prettyDate(pig.dob)} />
                 <Line k="Entered" v={prettyDate(pig.entryDate)} />
-                <Line k="Source" v={pig.sourceDetail || pig.source} />
+                <Line k="Source" v={sourceLabel(pig.source, pig.sourceDetail)} />
                 <Line k="Ear notch" v={pig.earNotch || '—'} />
                 <Line k="Show tag" v={pig.showTag || '—'} />
                 <Line k="Registration" v={pig.registrationNo || '—'} />

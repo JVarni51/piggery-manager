@@ -5,8 +5,24 @@ export const WEAN_AGE_DEFAULT = 21;
 export const HEAT_CYCLE_DEFAULT = 21;
 export const FARROW_INTERVAL_DEFAULT = 142;
 
-export type Stage = 'piglet' | 'weaner' | 'gilt' | 'sow' | 'boar' | 'barrow';
+/** Growth stages use US terms. Gilt, sow, boar, and barrow stay as reproductive stages. */
+export type Stage = 'piglet' | 'nursery' | 'grower' | 'finisher' | 'gilt' | 'sow' | 'boar' | 'barrow';
 export type Gender = 'male' | 'female';
+
+export const FEMALE_STAGES: Stage[] = ['piglet', 'nursery', 'grower', 'finisher', 'gilt', 'sow'];
+export const MALE_STAGES: Stage[] = ['piglet', 'nursery', 'grower', 'finisher', 'boar', 'barrow'];
+export const STAGE_ORDER: Stage[] = ['piglet', 'nursery', 'grower', 'finisher', 'gilt', 'sow', 'boar', 'barrow'];
+
+/** Services this many days apart belong to one heat. A 17–25 day gap is a return. */
+export const REPEAT_SERVICE_DAYS = 5;
+export const RETURN_GAP_MIN = 17;
+export const RETURN_GAP_MAX = 25;
+
+export function normalizeStage(stage: string): Stage {
+  if (stage === 'weaner') return 'nursery';
+  if ((STAGE_ORDER as string[]).includes(stage)) return stage as Stage;
+  return 'piglet';
+}
 export type PigStatus = 'active' | 'sold' | 'dead' | 'culled' | 'archived';
 export type Role = 'owner' | 'manager' | 'data_entry';
 
@@ -148,39 +164,51 @@ export type WithdrawalHit = {
   ends: string;
 };
 
+/**
+ * A pig is still in withdrawal on `asOf` when the end date is that day or later.
+ * Day 0 is the treatment day. The pig is clear the day after `ends`.
+ * Every event with an end date counts: sprays, pour-ons, and group events included.
+ */
 export function activeWithdrawals(
   events: {
     id: string;
     pigId: string | null;
     eventType: string;
+    eventDate?: string | null;
     withdrawalEnds: string | null;
     drugName: string | null;
+    vaccineName?: string | null;
+    customName?: string | null;
     deletedAt?: string | null;
   }[],
   pigId: string,
-  today: string,
+  asOf: string,
 ): WithdrawalHit[] {
   return events
     .filter(
       (event) =>
         event.pigId === pigId &&
         !event.deletedAt &&
-        (event.eventType === 'treatment' || event.eventType === 'deworming' || event.eventType === 'vaccination') &&
         event.withdrawalEnds != null &&
-        event.withdrawalEnds > today,
+        (!event.eventDate || event.eventDate <= asOf) &&
+        event.withdrawalEnds >= asOf,
     )
     .map((event) => ({
       eventId: event.id,
-      drug: event.drugName || 'Treatment',
+      drug: event.drugName || event.vaccineName || event.customName || 'Treatment',
       ends: event.withdrawalEnds as string,
     }))
     .sort((a, b) => b.ends.localeCompare(a.ends));
 }
 
+export function clearOn(ends: string): string {
+  return addDays(ends, 1);
+}
+
 export function saleBlockReason(hits: WithdrawalHit[]): string | null {
   if (!hits.length) return null;
   const hold = hits[0];
-  return `${hold.drug} withdrawal runs through ${hold.ends}. This pig is not sale-ready until that date.`;
+  return `${hold.drug} withdrawal runs through ${hold.ends}. This pig is not sale-ready until ${clearOn(hold.ends)}.`;
 }
 
 export function showEntryBlock(hits: WithdrawalHit[], showDate: string): { block: string | null; warn: string | null } {
@@ -235,15 +263,26 @@ export function preweanMortality(litter: LitterMath, fosters: FosterMath[]): num
 }
 
 export function pigsOnSow(litter: LitterMath, fosters: FosterMath[]): number {
+  if (litter.weanDate) return 0;
   const { inn, out } = fosterCounts(litter.id, fosters);
   const weaned = litter.weanedCount ?? 0;
   return Math.max(0, litter.bornAlive + inn - out - weaned);
+}
+
+export function totalBorn(litter: { bornAlive: number; stillborn: number; mummies: number }): number {
+  return litter.bornAlive + litter.stillborn + litter.mummies;
+}
+
+/** Parity of a farrowing is the sow's earlier farrowings plus one. */
+export function parityForFarrow(priorFarrowDates: string[], farrowDate: string): number {
+  return priorFarrowDates.filter((date) => date < farrowDate).length + 1;
 }
 
 export type BreedingMath = {
   id: string;
   pigId: string | null;
   eventDate: string;
+  heatId?: string | null;
   deletedAt?: string | null;
 };
 
@@ -270,10 +309,97 @@ function isOpenBreeding(breeding: BreedingMath, outcomes: OutcomeMath[]): boolea
   return !outcomes.some((event) => {
     if (event.deletedAt || event.breedingEventId !== breeding.id) return false;
     if (event.eventType === 'farrowing' || event.eventType === 'aborted') return true;
-    if (event.eventType === 'pregnancy_check' && event.pregResult === 'open') return true;
+    if (event.eventType === 'pregnancy_check' && (event.pregResult === 'open' || event.pregResult === 'returned')) return true;
     return false;
   });
 }
+
+export function heatIsOpen(services: BreedingMath[], outcomes: OutcomeMath[]): boolean {
+  if (!services.length) return false;
+  return services.every((service) => isOpenBreeding(service, outcomes));
+}
+
+/** Group a sow's services into heats. Repeats within a few days share a heat. */
+export function clusterHeats<T extends BreedingMath>(services: T[]): T[][] {
+  const byPig = new Map<string, T[]>();
+  for (const service of services) {
+    if (service.deletedAt) continue;
+    const key = service.pigId || '';
+    const list = byPig.get(key) || [];
+    list.push(service);
+    byPig.set(key, list);
+  }
+  const heats: T[][] = [];
+  for (const list of byPig.values()) {
+    const sorted = [...list].sort((a, b) => a.eventDate.localeCompare(b.eventDate) || a.id.localeCompare(b.id));
+    let current: T[] = [];
+    for (const service of sorted) {
+      if (!current.length) {
+        current = [service];
+        continue;
+      }
+      const heatKey = current[0].heatId || current[0].id;
+      const explicit = Boolean(service.heatId) && (service.heatId === heatKey || service.heatId === current[0].id);
+      const gap = diffDays(current[current.length - 1].eventDate, service.eventDate);
+      if (explicit || (gap >= 0 && gap <= REPEAT_SERVICE_DAYS)) current.push(service);
+      else {
+        heats.push(current);
+        current = [service];
+      }
+    }
+    if (current.length) heats.push(current);
+  }
+  return heats;
+}
+
+export function planBreedingHeat(input: {
+  pigId: string;
+  serviceDate: string;
+  newId: string;
+  gestationDays: number;
+  services: BreedingMath[];
+  outcomes: OutcomeMath[];
+}): { heatId: string; dueDate: string; returnedServiceIds: string[] } {
+  const heats = clusterHeats(input.services.filter((service) => service.pigId === input.pigId && service.id !== input.newId));
+  const open = heats.filter((heat) => heatIsOpen(heat, input.outcomes));
+  for (const heat of open) {
+    const first = heat[0];
+    const last = heat[heat.length - 1];
+    const afterLast = diffDays(last.eventDate, input.serviceDate);
+    const afterFirst = diffDays(first.eventDate, input.serviceDate);
+    if ((afterLast >= 0 && afterLast <= REPEAT_SERVICE_DAYS) || (afterFirst < 0 && Math.abs(afterFirst) <= REPEAT_SERVICE_DAYS)) {
+      const anchor = afterFirst < 0 ? input.serviceDate : first.eventDate;
+      return {
+        heatId: first.heatId || first.id,
+        dueDate: expectedFarrowDate(anchor, input.gestationDays),
+        returnedServiceIds: [],
+      };
+    }
+  }
+  const returned = new Set<string>();
+  for (const heat of open) {
+    const gap = diffDays(heat[heat.length - 1].eventDate, input.serviceDate);
+    if (gap >= RETURN_GAP_MIN && gap <= RETURN_GAP_MAX) {
+      for (const service of heat) returned.add(service.id);
+    }
+  }
+  return {
+    heatId: input.newId,
+    dueDate: expectedFarrowDate(input.serviceDate, input.gestationDays),
+    returnedServiceIds: [...returned],
+  };
+}
+
+export type InventoryPig = {
+  id: string;
+  stage: string;
+  status: string;
+  gender?: string;
+  entryDate?: string | null;
+  dob?: string | null;
+  breedingHerd?: boolean;
+  leftOn?: string | null;
+};
 
 export type KpiSnapshot = {
   farrowingRate: number | null;
@@ -283,34 +409,69 @@ export type KpiSnapshot = {
   psy: number | null;
   littersPerSow: number | null;
   weanedPerLitter: number | null;
+  /** Estimated from litters per sow and lactation, not from each sow's open days. */
   npd: number | null;
+  npdEstimated: boolean;
+  lactationDays: number | null;
   sowCount: number;
 };
+
+function isBreedingFemale(pig: InventoryPig, bred: Set<string>): boolean {
+  const female = pig.gender ? pig.gender === 'female' : pig.stage === 'sow' || pig.stage === 'gilt';
+  if (!female) return false;
+  if (!pig.gender) return pig.stage === 'sow' || pig.stage === 'gilt';
+  if (pig.stage === 'sow' || pig.stage === 'gilt') return true;
+  return Boolean(pig.breedingHerd) || bred.has(pig.id);
+}
+
+function presentOn(pig: InventoryPig, day: string): boolean {
+  const start = pig.entryDate || pig.dob || null;
+  if (start && start > day) return false;
+  if (pig.leftOn) return day < pig.leftOn;
+  if (pig.status === 'sold' || pig.status === 'dead' || pig.status === 'culled') return false;
+  return true;
+}
+
+export function averageBreedingFemales(pigs: InventoryPig[], breedings: BreedingMath[], from: string, to: string): number {
+  const bred = new Set(breedings.filter((row) => !row.deletedAt && row.pigId).map((row) => row.pigId as string));
+  const females = pigs.filter((pig) => isBreedingFemale(pig, bred));
+  const days = diffDays(from, to) + 1;
+  if (days <= 0 || females.length === 0) return 0;
+  let femaleDays = 0;
+  for (let cursor = from; cursor <= to; cursor = addDays(cursor, 1)) {
+    for (const pig of females) {
+      if (presentOn(pig, cursor)) femaleDays += 1;
+    }
+  }
+  return femaleDays / days;
+}
 
 export function herdKpis(input: {
   today: string;
   gestationDays: number;
   weaningAgeDays: number;
-  pigs: { id: string; stage: string; status: string }[];
+  pigs: InventoryPig[];
   litters: LitterMath[];
   fosters: FosterMath[];
   breedings: BreedingMath[];
   outcomes: OutcomeMath[];
 }): KpiSnapshot {
   const from = addDays(input.today, -364);
-  const sows = input.pigs.filter((pig) => pig.stage === 'sow' && pig.status === 'active');
-  const sowCount = sows.length;
-  const breedings = input.breedings.filter(
-    (event) => !event.deletedAt && inRange(event.eventDate, from, input.today),
-  );
+  const sowCount = averageBreedingFemales(input.pigs, input.breedings, from, input.today);
+  const heats = clusterHeats(input.breedings);
   let matings = 0;
   let farrowed = 0;
-  for (const breeding of breedings) {
-    const due = expectedFarrowDate(breeding.eventDate, input.gestationDays);
-    const linked = input.outcomes.filter((event) => !event.deletedAt && event.breedingEventId === breeding.id);
+  for (const heat of heats) {
+    const first = heat[0];
+    if (!inRange(first.eventDate, from, input.today)) continue;
+    const memberIds = new Set(heat.map((service) => service.id));
+    const linked = input.outcomes.filter((event) => !event.deletedAt && event.breedingEventId && memberIds.has(event.breedingEventId));
     const didFarrow = linked.some((event) => event.eventType === 'farrowing');
-    const opened = linked.some((event) => event.eventType === 'pregnancy_check' && event.pregResult === 'open');
+    const opened = linked.some(
+      (event) => event.eventType === 'pregnancy_check' && (event.pregResult === 'open' || event.pregResult === 'returned'),
+    );
     const aborted = linked.some((event) => event.eventType === 'aborted');
+    const due = expectedFarrowDate(first.eventDate, input.gestationDays);
     const resolved = didFarrow || opened || aborted || due <= input.today;
     if (!resolved) continue;
     matings += 1;
@@ -321,19 +482,27 @@ export function herdKpis(input: {
   let deaths = 0;
   let weaned = 0;
   let weanedLitters = 0;
+  const lactations: number[] = [];
   for (const litter of litters) {
-    born += litter.bornAlive;
     if (litter.weanedCount == null) continue;
     weanedLitters += 1;
+    born += litter.bornAlive;
     weaned += litter.weanedCount;
     const { inn, out } = fosterCounts(litter.id, input.fosters);
     deaths += litter.bornAlive - litter.weanedCount + inn - out;
+    if (litter.weanDate) {
+      const days = diffDays(litter.farrowDate, litter.weanDate);
+      if (days >= 0) lactations.push(days);
+    }
   }
   const littersPerSow = sowCount > 0 ? litters.length / sowCount : null;
   const weanedPerLitter = weanedLitters > 0 ? weaned / weanedLitters : null;
   const psy =
     littersPerSow != null && weanedPerLitter != null ? littersPerSow * weanedPerLitter : null;
-  const lactation = input.weaningAgeDays || WEAN_AGE_DEFAULT;
+  const lactation =
+    lactations.length > 0
+      ? lactations.reduce((sum, days) => sum + days, 0) / lactations.length
+      : input.weaningAgeDays || WEAN_AGE_DEFAULT;
   const npd =
     littersPerSow == null
       ? null
@@ -347,6 +516,8 @@ export function herdKpis(input: {
     littersPerSow,
     weanedPerLitter,
     npd,
+    npdEstimated: true,
+    lactationDays: lactations.length > 0 ? lactation : null,
     sowCount,
   };
 }
@@ -466,10 +637,9 @@ export function stockOf(
 }
 
 export function stageCounts(pigs: { stage: string; status: string }[]): { stage: Stage; count: number }[] {
-  const stages: Stage[] = ['piglet', 'weaner', 'gilt', 'sow', 'boar', 'barrow'];
-  return stages.map((stage) => ({
+  return STAGE_ORDER.map((stage) => ({
     stage,
-    count: pigs.filter((pig) => pig.status === 'active' && pig.stage === stage).length,
+    count: pigs.filter((pig) => pig.status === 'active' && normalizeStage(pig.stage) === stage).length,
   }));
 }
 
@@ -508,8 +678,9 @@ export function upcomingTasks(input: {
     if (!pig) return 'Unknown pig';
     return pig.name ? `${pig.tag} ${pig.name}` : pig.tag;
   };
-  const open = input.breedings.filter((breeding) => isOpenBreeding(breeding, input.outcomes));
-  for (const breeding of open) {
+  const openHeats = clusterHeats(input.breedings).filter((heat) => heatIsOpen(heat, input.outcomes));
+  for (const heat of openHeats) {
+    const breeding = heat[0];
     const due = expectedFarrowDate(breeding.eventDate, input.gestationDays);
     const days = diffDays(input.today, due);
     if (days <= 14) {
@@ -522,17 +693,18 @@ export function upcomingTasks(input: {
         href: breeding.pigId ? `/pigs/${breeding.pigId}` : '/events',
       });
     }
+    const memberIds = new Set(heat.map((service) => service.id));
     const checked = input.outcomes.some(
-      (event) => !event.deletedAt && event.breedingEventId === breeding.id && event.eventType === 'pregnancy_check',
+      (event) => !event.deletedAt && event.breedingEventId && memberIds.has(event.breedingEventId) && event.eventType === 'pregnancy_check',
     );
     const checkOn = heatCheckDate(breeding.eventDate, input.heatCycleDays);
     if (!checked && checkOn <= addDays(input.today, 3) && input.today < due) {
       items.push({
         id: `heat-${breeding.id}`,
         tone: checkOn < input.today ? 'warn' : 'info',
-        kicker: 'Heat check',
+        kicker: 'Return-to-heat check',
         title: pigName(breeding.pigId),
-        detail: `Bred ${breeding.eventDate}. Check around ${checkOn}.`,
+        detail: `Served ${breeding.eventDate}. Check around ${checkOn} (about 21 days).`,
         href: breeding.pigId ? `/events/new?pig=${breeding.pigId}&type=pregnancy_check&breeding=${breeding.id}` : '/events',
       });
     }
@@ -540,7 +712,7 @@ export function upcomingTasks(input: {
   for (const pig of input.pigs) {
     const breedingHerd = pig.stage === 'sow' || (pig.stage === 'gilt' && pig.breedingHerd);
     if (pig.status !== 'active' || !breedingHerd) continue;
-    const gestating = open.some((breeding) => breeding.pigId === pig.id);
+    const gestating = openHeats.some((heat) => heat.some((breeding) => breeding.pigId === pig.id));
     const nursing = input.litters.some((litter) => {
       if (litter.sowId !== pig.id || litter.weanDate) return false;
       return diffDays(litter.farrowDate, input.today) <= input.weaningAgeDays + 14;

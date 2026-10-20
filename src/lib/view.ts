@@ -1,8 +1,9 @@
 import { diffDays, prettyDate, todayISO } from '@/domain/dates';
 import {
   activeWithdrawals,
+  clusterHeats,
   expectedFarrowDate,
-  isOpenBreeding,
+  heatIsOpen,
   recentAdg,
   type WeightPoint,
 } from '@/domain/herd';
@@ -11,6 +12,22 @@ import type { HerdEvent, NamedRow, Pig, Snapshot } from '@/data/types';
 export function oneParam(value: string | string[] | undefined): string {
   if (Array.isArray(value)) return value[0] || '';
   return value || '';
+}
+
+export function cleanParams(
+  params: Record<string, string | string[] | undefined>,
+  patch: Record<string, string | null | undefined>,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(params)) {
+    const one = oneParam(value);
+    if (one) next[key] = one;
+  }
+  for (const [key, value] of Object.entries(patch)) {
+    if (!value) delete next[key];
+    else next[key] = value;
+  }
+  return next;
 }
 
 export function pigLabel(pig: { tag: string; name?: string | null } | undefined): string {
@@ -26,6 +43,23 @@ export function findPig(snap: Snapshot, id: string | null | undefined): Pig | un
 export function named(rows: { id: string; name: string }[], id: string | null | undefined): string {
   if (!id) return '—';
   return rows.find((row) => row.id === id)?.name || 'Removed';
+}
+
+export function inventoryPigs(snap: Snapshot) {
+  return snap.pigs.map((pig) => ({
+    id: pig.id,
+    stage: pig.stage,
+    status: pig.status,
+    gender: pig.gender,
+    entryDate: pig.entryDate,
+    dob: pig.dob,
+    breedingHerd: inBreedingHerd(pig, snap.groups),
+    leftOn:
+      snap.events
+        .filter((event) => event.pigId === pig.id && (event.eventType === 'sale' || event.eventType === 'death' || event.eventType === 'cull'))
+        .map((event) => event.eventDate)
+        .sort()[0] || null,
+  }));
 }
 
 export function inBreedingHerd(pig: Pig, groups: NamedRow[]): boolean {
@@ -56,20 +90,24 @@ export function weightPoints(events: HerdEvent[], pigId: string): WeightPoint[] 
 export function openBreeding(events: HerdEvent[], pigId: string, gestationDays: number) {
   const mine = events.filter((event) => event.pigId === pigId);
   const breedings = mine.filter((event) => event.eventType === 'breeding');
-  const open = breedings
-    .filter((event) =>
-      isOpenBreeding(
-        { id: event.id, pigId: event.pigId, eventDate: event.eventDate },
-        mine,
-      ),
-    )
-    .sort((a, b) => b.eventDate.localeCompare(a.eventDate));
+  const open = clusterHeats(
+    breedings.map((event) => ({
+      id: event.id,
+      pigId: event.pigId,
+      eventDate: event.eventDate,
+      heatId: event.heatId,
+    })),
+  )
+    .filter((heat) => heatIsOpen(heat, mine))
+    .sort((a, b) => b[0].eventDate.localeCompare(a[0].eventDate));
   const latest = open[0];
   if (!latest) return null;
+  const first = latest[0];
+  const stored = breedings.find((event) => event.id === first.id);
   return {
-    event: latest,
-    due: expectedFarrowDate(latest.eventDate, gestationDays),
-    recordedDue: latest.dueDate,
+    event: stored || breedings[0],
+    due: expectedFarrowDate(first.eventDate, gestationDays),
+    recordedDue: stored?.dueDate ?? null,
   };
 }
 

@@ -37,6 +37,12 @@ function GroupForm({ snap, id, pigs }: { snap: Snapshot; id: string; pigs: strin
   const [customName, setCustomName] = useState(existing?.customName || '');
   const [notes, setNotes] = useState(existing?.notes || '');
   const [hold, setHold] = useState(existing?.withdrawalDays != null ? String(existing.withdrawalDays) : '');
+  const [lotNo, setLotNo] = useState(existing?.lotNo || '');
+  const [productExpiry, setProductExpiry] = useState(existing?.productExpiry || '');
+  const [eldu, setEldu] = useState(Boolean(existing?.eldu));
+  const [elduVet, setElduVet] = useState(existing?.elduVet || '');
+  const [vfdExpiry, setVfdExpiry] = useState(existing?.vfdExpiry || '');
+  const [vfdDoc, setVfdDoc] = useState(existing?.vfdDocUri || '');
   const [cost, setCost] = useState(dollarsInput(existing?.costCents));
   const active = snap.pigs.filter((pig) => pig.status === 'active' || pigIds.includes(pig.id));
   const coverage = useMemo(
@@ -77,9 +83,23 @@ function GroupForm({ snap, id, pigs }: { snap: Snapshot; id: string; pigs: strin
         <Field label="Name, if it is not a treatment" value={customName} onChange={setCustomName} />
         <Fields>
           <Field label="Withdrawal days" value={hold} onChange={setHold} />
+          <Field label="Lot number" value={lotNo} onChange={setLotNo} />
+          <DateField label="Product expiry" value={productExpiry} onChange={setProductExpiry} />
+          <Select
+            label="Extra-label use"
+            value={eldu ? 'yes' : 'no'}
+            onChange={(value) => setEldu(value === 'yes')}
+            options={[
+              { value: 'no', label: 'Label use' },
+              { value: 'yes', label: 'Extra-label (ELDU)' },
+            ]}
+          />
+          {eldu ? <Field label="ELDU veterinarian" value={elduVet} onChange={setElduVet} /> : null}
+          <DateField label="VFD expiry" value={vfdExpiry} onChange={setVfdExpiry} />
+          <Field label="VFD document link" value={vfdDoc} onChange={setVfdDoc} />
           <Field label="Cost (USD, optional)" value={cost} onChange={setCost} />
         </Fields>
-        <Text style={ui.small}>A cost becomes one veterinary expense for the group, not a charge on every pig.</Text>
+        <Text style={ui.small}>A cost becomes one veterinary expense for the group, not a charge on every pig. Withdrawal days apply to every pig covered, including sprays. Keep VFD copies for 2 years.</Text>
         <Field label="Notes" value={notes} onChange={setNotes} multiline />
         <Text style={ui.label}>Pigs covered ({pigIds.length})</Text>
         <ChoiceList
@@ -104,6 +124,12 @@ function GroupForm({ snap, id, pigs }: { snap: Snapshot; id: string; pigs: strin
                   customName,
                   notes,
                   withdrawalDays: parseNumber(hold),
+                  lotNo,
+                  productExpiry: productExpiry || null,
+                  eldu,
+                  elduVet,
+                  vfdExpiry: vfdExpiry || null,
+                  vfdDocUri: vfdDoc,
                   costCents: centsFromDollars(cost),
                 },
                 existing?.id,

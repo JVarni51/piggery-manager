@@ -28,8 +28,10 @@ Scan the QR code from the terminal. If Expo Go asks you to upgrade, the store bu
 ## Static hosting (Cloudflare Pages)
 
 ```bash
-npx expo export -p web
+npm run export:web
 ```
+
+That runs `npx expo export -p web`, then `scripts/clean-export.js`. Expo writes a few assets under `dist/assets/node_modules/` (the wa-sqlite wasm and the expo-router icons). Cloudflare Pages will not upload a path that contains `node_modules`, so the script moves those files to `dist/assets/vendor/` and rewrites the references. Use the same command as the Git build so Pages produces a clean `dist` itself.
 
 Publish the `dist/` folder. The build is a single-page app (`web.output` is `single`). `public/_redirects` is copied into `dist` so unknown paths fall back to `index.html`:
 
@@ -37,20 +39,22 @@ Publish the `dist/` folder. The build is a single-page app (`web.output` is `sin
 /*    /index.html   200
 ```
 
-Build command: `npx expo export -p web`. Output directory: `dist`.
+Build command: `npm run export:web`. Output directory: `dist`.
 
 ## What the demo includes
 
-- Dashboard with a date range, income, expenses, net, pigs by stage, and a list of farrowings, heat checks, open breeding females, low feed, and withdrawal holds.
-- Pigs with sex, breed, group, stage, and status filters, photos up to 3 MB, and sire and dam checks (not self, not a descendant, sex and birth order).
-- One event form for breeding, pregnancy check, farrowing, weaning, castration, vaccination, treatment, weight, sale, death, and cull. A pig’s Events tab can add, edit, and filter those.
-- Breeding stores a due date from the farm gestation (114 days unless you change it). Open breedings recompute the expected date from the current setting.
-- Litters with foster moves and weaning counts. Pre-wean mortality is (born alive − weaned + fostered in − fostered out) / born alive.
-- Group events that store both the group and the pigs covered that day, plus an optional cost.
-- Sales that require a buyer and a price above zero, and that refuse a pig still inside a withdrawal. Show entry is blocked when withdrawal ends on or after the show date.
-- Income and expenses. The type can be changed after save. A feed purchase is one expense and one stock addition.
-- Feed on hand in pounds, with reductions that cannot go negative.
-- Reports for money, pigs, events, feed, and breeding. Ranges include a custom from–to, all time, and last year. Totals are in tables. CSV download uses the same filters. The filters are query parameters on `/reports`, so the URL can be shared.
+- Dashboard with a date range in the URL, income, expenses, net, pigs by stage, and a list of farrowings, return-to-heat checks, open breeding females, low feed, and withdrawal holds.
+- Pigs with sex, breed, group, stage, and status filters in the URL. Active pigs are the default, sorted by tag in numeric order. Photos up to 3 MB. Sire and dam lists offer only a valid parent: the right sex, born first, still active, and a sire that is not castrated.
+- Stages use US terms: piglet, nursery, grower, finisher, gilt, sow, and boar. Castration is its own flag. A barrow is a castrated male; gilt and sow stay the reproductive stages.
+- One event form for breeding, pregnancy check, farrowing, weaning, castration, vaccination, treatment, spray, weight, sale, death, and cull. A pig’s Events tab can add, edit, and filter those. A weight chart sits on the pig page when there are two or more weights.
+- Services a few days apart share one heat. A service 17–25 days later closes the earlier open heat as returned. The due date comes from the first service in the heat and the farm gestation (114 days unless you change it). Farrowing rate is counted per heat.
+- Litters with foster moves and weaning counts. Pre-wean mortality uses weaned litters only: (born alive − weaned + fostered in − fostered out) / born alive. Parity defaults to the sow’s earlier farrowings plus one, and it stays editable. A piglet with the same litter number and dam is linked to that litter.
+- Group events that store both the group and the pigs covered that day, plus an optional cost. A withdrawal on a spray, an “other” event, or a group event counts the same as a treatment.
+- Sales require a buyer and a price above zero. Withdrawal is checked against the sale date, not the day you type it in. Day 0 is the treatment day, and the pig is clear the day after the withdrawal end date. Show entries are checked again when the show page opens. Weigh-in and a recorded sale are blocked while that entry is in conflict.
+- Treatments can store a lot number, product expiry, an extra-label flag (which requires the veterinarian and a withdrawal), and VFD expiry and document fields. Keep VFD copies for two years.
+- Pigs per sow per year uses the average number of breeding females over the trailing year. Non-productive days are labeled as an estimate and use actual lactation when wean dates exist.
+- Income, expenses, events, and feed can be filtered by date and pig, and those filters stay in the URL. Lists download CSV. Feed movements and farm-setup rows can be edited. A save shows a short “Saved.” confirmation.
+- Reports for money, pigs, events, feed, and breeding. An inverted from–to range is rejected. An unknown range preset says so and falls back to this month. Totals are in tables. CSV download uses the same filters.
 - A family tree with ancestors and descendants. Nodes show tag and name, colored by sex, and open that pig.
 - Farm setup for breeds, groups, feed types, and categories, plus gestation, weaning age, heat cycle, and farrowing interval.
 - Roles on this device only: Owner, Manager, and Data entry. There is no password. Owner can reset the demo.
@@ -81,15 +85,23 @@ npm run typecheck
 
 ## Roadmap
 
-These were called out as high-value gaps and are not in this version:
+The first pass covers residue checks, the herd-math corrections, and the small list and form fixes. These larger gaps are still open:
 
-- Zoom, pan, and image export on the family tree. The tree itself is in the app.
-- A full permission matrix, invites, passwords, and two-factor sign-in. The app has three roles on the device.
-- A separate insemination-tracker page. Breeding and pregnancy checks are events, and the breeding report covers the summary.
-- PDF or print export, and Excel workbooks. Reports download CSV.
+- A separate 28–35 day pregnancy-check reminder. The 21-day task is labeled “Return-to-heat check” and still opens the pregnancy-check form.
+- A sow card: one row per parity with service date, boar, farrow date, total born, born alive, stillborn, mummified, fostered in and out, weaned, and wean weight. Total born is already derived on the litter page.
+- Three-weight or regression average daily gain next to the two-weight figure used for show pace.
+- Record-book export mapped to AET, the California 4-H APR, and the Nevada Western Area book, plus a buyer packet (pedigree, notch, weights, treatments with clear dates).
+- A semen-lot table (collection date, doses) and piglet-death events with a date, count, and cause.
+- Ear-notch validation (litter number–pig number), breed-association fields, and an exhibitor YQCA number.
+- Zoom, pan, and image export on the family tree.
+- A full permission matrix, invites, passwords, and two-factor sign-in. Roles on this device stay advisory.
+- A separate insemination-tracker page.
+- PDF or print export, and Excel workbooks. Lists and reports download CSV.
 - Receipt photos, recurring expenses, and a choice of kilograms, currency, or timezone.
 - Barcode or electronic ID.
 - Multi-user sync. The row shape is ready; the server is not.
-- A vaccine protocol calendar beyond the optional next-due date on a vaccination.
-- Batch archive or batch sale. You can select pigs, move their group, and start a group event.
+- A vaccine protocol calendar beyond the optional next-due date.
+- Batch archive or batch sale, and audit columns on list rows.
+- Unsaved-changes warnings, “Save & add another”, and desktop dropdowns that do not leave a blank gap.
 - Dark mode.
+- A custom date range on the dashboard. Presets are in the URL today.

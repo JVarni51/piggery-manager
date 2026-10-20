@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Text } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { can, fosterCounts, pigsOnSow, preweanMortality } from '@/domain/herd';
+import { can, fosterCounts, parityForFarrow, pigsOnSow, preweanMortality, totalBorn } from '@/domain/herd';
 import { percent, pounds, parseNumber } from '@/domain/format';
 import { prettyDate, todayISO } from '@/domain/dates';
+import { STAGE_LABELS, STATUS_LABELS } from '@/domain/labels';
 import { oneParam, pigLabel } from '@/lib/view';
 import { ui } from '@/theme';
 import { Gate } from '@/components/Gate';
@@ -45,12 +46,18 @@ function LitterDetail({ id }: { id: string }) {
         const sire = snap.pigs.find((pig) => pig.id === litter.sireId);
         const foster = fosterCounts(litter.id, snap.fosters);
         const piglets = snap.pigs.filter((pig) => pig.litterId === litter.id);
+        const parity =
+          litter.parity ??
+          parityForFarrow(
+            snap.litters.filter((row) => row.sowId === litter.sowId && row.id !== litter.id).map((row) => row.farrowDate),
+            litter.farrowDate,
+          );
         const moves = snap.fosters.filter((move) => move.fromLitterId === litter.id || move.toLitterId === litter.id);
         return (
-          <Page title={`${pigLabel(sow)} litter`} lede={`Farrowed ${prettyDate(litter.farrowDate)}. Parity ${litter.parity ?? '—'}.`}>
+          <Page title={litter.litterNumber ? `Litter ${litter.litterNumber}` : `${pigLabel(sow)} litter`} lede={`Farrowed ${prettyDate(litter.farrowDate)}. Parity ${parity}. ${litter.litterNumber ? `Litter number ${litter.litterNumber}.` : ''}`}>
             {error ? <Notice tone="bad" text={error} /> : null}
             <Card>
-              <Text style={ui.body}>Born alive {litter.bornAlive}. Stillborn {litter.stillborn}. Mummies {litter.mummies}.</Text>
+              <Text style={ui.body}>Total born {totalBorn(litter)}. Born alive {litter.bornAlive}. Stillborn {litter.stillborn}. Mummified {litter.mummies}.</Text>
               <Text style={ui.body}>Fostered in {foster.inn}, out {foster.out}. On the sow now: {pigsOnSow(litter, snap.fosters)}.</Text>
               <Text style={ui.body}>Weaned {litter.weanedCount ?? '—'} on {prettyDate(litter.weanDate)}. Pre-wean mortality {percent(preweanMortality(litter, snap.fosters))}.</Text>
               <Text style={ui.small}>Birth weight {pounds(litter.birthWeightLb)} · wean weight {pounds(litter.weanWeightLb)}</Text>
@@ -67,8 +74,8 @@ function LitterDetail({ id }: { id: string }) {
                 rows={piglets.map((pig) => ({
                   key: pig.id,
                   title: pigLabel(pig),
-                  meta: pig.status,
-                  detail: pig.stage,
+                  meta: STATUS_LABELS[pig.status] || pig.status,
+                  detail: STAGE_LABELS[pig.stage] || pig.stage,
                   onPress: () => router.push(`/pigs/${pig.id}`),
                 }))}
               />

@@ -1,16 +1,18 @@
-import { useRouter } from 'expo-router';
+import { Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { can } from '@/domain/herd';
-import { prettyDate } from '@/domain/dates';
-import { money } from '@/domain/format';
-import { named, pigLabel } from '@/lib/view';
+import { inRange, prettyDate } from '@/domain/dates';
+import { money, titleCase } from '@/domain/format';
+import { toCsv } from '@/domain/csv';
+import { cleanParams, named, oneParam, pigLabel } from '@/lib/view';
+import { downloadText } from '@/lib/download';
 import type { Snapshot } from '@/data/types';
+import { ui } from '@/theme';
 import { Gate } from './Gate';
 import { useStickyAdd } from './Shell';
 import { TxnForm } from './TxnForm';
 import { useSave } from './useSave';
-import { Button, Card, Empty, Notice, Page, StackList, confirmAsync } from './ui';
-import { Text } from 'react-native';
-import { ui } from '@/theme';
+import { Button, Card, DateField, Empty, Fields, Notice, Page, Select, StackList, confirmAsync, useNarrow } from './ui';
 
 export function MoneyList({ kind }: { kind: 'income' | 'expense' }) {
   const title = kind === 'income' ? 'Income' : 'Expenses';
@@ -24,17 +26,71 @@ export function MoneyList({ kind }: { kind: 'income' | 'expense' }) {
 
 function List({ snap, kind, title, href }: { snap: Snapshot; kind: 'income' | 'expense'; title: string; href: string }) {
   const router = useRouter();
+  const { narrow } = useNarrow();
+  const params = useLocalSearchParams<{ from?: string; to?: string; pig?: string }>();
+  const from = oneParam(params.from);
+  const to = oneParam(params.to);
+  const pigId = oneParam(params.pig);
   const writable = can(snap.actor.role, 'write');
   useStickyAdd(writable ? { label: `Add ${kind}`, href } : null);
-  const rows = snap.transactions.filter((txn) => txn.kind === kind);
+  const rangeError = from && to && from > to ? 'The From date has to be on or before the To date.' : '';
+  const rows = snap.transactions.filter((txn) => {
+    if (txn.kind !== kind) return false;
+    if (pigId && txn.pigId !== pigId) return false;
+    if (rangeError) return false;
+    if ((from || to) && !inRange(txn.txnDate, from || null, to || null)) return false;
+    return true;
+  });
   const total = rows.reduce((sum, txn) => sum + txn.amountCents, 0);
   const categories = kind === 'income' ? snap.incomeCategories : snap.expenseCategories;
+  const lede =
+    kind === 'expense'
+      ? `${money(total)} across ${rows.length} rows. Feed purchases share one stock movement, so they are not entered again under Feed.`
+      : `${money(total)} across ${rows.length} rows. A pig sale from the event form lands here with the buyer and the price.`;
+  function setQuery(patch: Record<string, string | null>) {
+    router.replace({ pathname: kind === 'income' ? '/income' : '/expenses', params: cleanParams(params, patch) });
+  }
   return (
     <Page
       title={title}
-      lede={`${money(total)} across ${rows.length} rows. Feed purchases share one stock movement, so they are not entered again under Feed.`}
-      action={writable ? <Button label={`Add ${kind}`} onPress={() => router.push(href)} /> : null}
+      lede={lede}
+      action={
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <Button
+            tone="secondary"
+            label="Download CSV"
+            onPress={() => {
+              void downloadText(
+                `herdkeep-${kind}.csv`,
+                toCsv(
+                  ['Date', 'Title', 'Type', 'Category', 'Amount', 'Pig'],
+                  rows.map((txn) => [
+                    txn.txnDate,
+                    txn.title,
+                    titleCase(txn.txnType),
+                    named(categories, txn.categoryId),
+                    (txn.amountCents / 100).toFixed(2),
+                    txn.pigId ? pigLabel(snap.pigs.find((pig) => pig.id === txn.pigId)) : '',
+                  ]),
+                ),
+              );
+            }}
+          />
+          {writable && !narrow ? <Button label={`Add ${kind}`} onPress={() => router.push(href)} /> : null}
+        </View>
+      }
     >
+      <Fields>
+        <DateField label="From" value={from} onChange={(value) => setQuery({ from: value })} />
+        <DateField label="To" value={to} onChange={(value) => setQuery({ to: value })} />
+        <Select
+          label="Pig"
+          value={pigId}
+          onChange={(value) => setQuery({ pig: value })}
+          options={[{ value: '', label: 'Any pig' }, ...snap.pigs.map((pig) => ({ value: pig.id, label: pigLabel(pig) }))]}
+        />
+      </Fields>
+      {rangeError ? <Notice tone="bad" text={rangeError} /> : null}
       {rows.length === 0 ? <Empty title={`No ${kind} yet`} body="Sales from the event form land here automatically." /> : null}
       <StackList
         rows={rows.map((txn) => ({
@@ -42,7 +98,7 @@ function List({ snap, kind, title, href }: { snap: Snapshot; kind: 'income' | 'e
           title: txn.title,
           meta: money(txn.amountCents),
           tone: kind === 'income' ? 'good' : 'warn',
-          detail: `${prettyDate(txn.txnDate)} · ${txn.txnType.replace(/_/g, ' ')} · ${named(categories, txn.categoryId)}${txn.pigId ? ` · ${pigLabel(snap.pigs.find((pig) => pig.id === txn.pigId))}` : ''}`,
+          detail: `${prettyDate(txn.txnDate)} · ${titleCase(txn.txnType)} · ${txn.txnType === 'feed_purchase' ? 'Feed' : named(categories, txn.categoryId)}${txn.pigId ? ` · ${pigLabel(snap.pigs.find((pig) => pig.id === txn.pigId))}` : ''}`,
           onPress: () => router.push(kind === 'income' ? `/income/${txn.id}` : `/expenses/${txn.id}`),
         }))}
       />

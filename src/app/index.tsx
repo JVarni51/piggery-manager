@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
-import { categoryTotals, herdKpis, moneyBuckets, showPace, stageCounts, stockOf, upcomingTasks } from '@/domain/herd';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { activeWithdrawals, categoryTotals, herdKpis, moneyBuckets, showPace, stageCounts, stockOf, upcomingTasks } from '@/domain/herd';
 import { RANGE_LABELS, inRange, rangeFor, todayISO, type RangePreset } from '@/domain/dates';
 import { adgLabel, money, percent, pounds } from '@/domain/format';
 import { paceLabel } from '@/domain/herd';
-import { inBreedingHerd, pigLabel } from '@/lib/view';
+import { inBreedingHerd, inventoryPigs, oneParam, pigLabel } from '@/lib/view';
 import { colors, sans, ui } from '@/theme';
 import { MoneyChart, StageChart } from '@/components/Charts';
 import { Gate } from '@/components/Gate';
@@ -23,8 +23,13 @@ export default function Dashboard() {
 
 function Today({ snap }: { snap: Parameters<Parameters<typeof Gate>[0]['children']>[0] }) {
   const router = useRouter();
+  const params = useLocalSearchParams<{ preset?: string }>();
   const today = todayISO();
-  const [preset, setPreset] = useState<RangePreset>('month');
+  const requested = oneParam(params.preset) as RangePreset;
+  const preset: RangePreset = PRESETS.includes(requested) ? requested : 'month';
+  function setPreset(value: string) {
+    router.replace({ pathname: '/', params: { preset: value } });
+  }
   const range = rangeFor(preset, today);
   const txns = snap.transactions.map((txn) => ({
     kind: txn.kind,
@@ -54,9 +59,9 @@ function Today({ snap }: { snap: Parameters<Parameters<typeof Gate>[0]['children
     breedings: snap.events.filter((event) => event.eventType === 'breeding'),
     outcomes: snap.events,
     litters: snap.litters,
-    withdrawals: snap.events
-      .filter((event) => event.withdrawalEnds && event.withdrawalEnds > today && event.pigId)
-      .map((event) => ({ pigId: event.pigId as string, drug: event.drugName || event.vaccineName || 'Treatment', ends: event.withdrawalEnds as string })),
+    withdrawals: snap.pigs.flatMap((pig) =>
+      activeWithdrawals(snap.events, pig.id, today).map((hit) => ({ pigId: pig.id, drug: hit.drug, ends: hit.ends })),
+    ),
     lowFeeds: snap.feedTypes
       .map((feed) => ({ name: feed.name, onHand: stockOf(snap.feedMoves, feed.id), unit: feed.unit, reorder: feed.reorderLb }))
       .filter((feed) => feed.onHand < feed.reorder)
@@ -68,7 +73,7 @@ function Today({ snap }: { snap: Parameters<Parameters<typeof Gate>[0]['children
         today,
         gestationDays: snap.farm.gestationDays,
         weaningAgeDays: snap.farm.weaningAgeDays,
-        pigs: snap.pigs,
+        pigs: inventoryPigs(snap),
         litters: snap.litters,
         fosters: snap.fosters,
         breedings: snap.events.filter((event) => event.eventType === 'breeding'),
@@ -150,15 +155,15 @@ function Today({ snap }: { snap: Parameters<Parameters<typeof Gate>[0]['children
       <Card>
         <Text style={ui.h2}>Trailing 12 months</Text>
         <Text style={ui.small}>
-          Approximate, using {kpis.sowCount} active sows. Farrowing rate counts only breedings that already resolved.
+          Farrowing rate counts heats, not every repeat service. Pigs weaned per sow uses {kpis.sowCount.toFixed(1)} average breeding females over the year. Pre-wean mortality uses weaned litters only.
         </Text>
         <Grid>
-          <Stat label="Farrowing rate" value={percent(kpis.farrowingRate)} hint={`${kpis.farrowed} farrowed of ${kpis.matings} resolved`} />
-          <Stat label="Pre-wean mortality" value={percent(kpis.preweanMortality)} />
+          <Stat label="Farrowing rate" value={percent(kpis.farrowingRate)} hint={`${kpis.farrowed} farrowed of ${kpis.matings} resolved heats`} />
+          <Stat label="Pre-wean mortality" value={percent(kpis.preweanMortality)} hint="Weaned litters only." />
           <Stat label="Pigs weaned / sow / year" value={kpis.psy == null ? '—' : kpis.psy.toFixed(1)} />
           <Stat label="Litters / sow / year" value={kpis.littersPerSow == null ? '—' : kpis.littersPerSow.toFixed(2)} />
           <Stat label="Weaned / litter" value={kpis.weanedPerLitter == null ? '—' : kpis.weanedPerLitter.toFixed(1)} />
-          <Stat label="Non-productive days" value={kpis.npd == null ? '—' : kpis.npd.toFixed(0)} hint="365 minus litters × (gestation + weaning age)." />
+          <Stat label="Estimated NPD" value={kpis.npd == null ? '—' : kpis.npd.toFixed(0)} hint="Estimated. 365 minus litters per sow times gestation plus lactation. Lactation uses actual wean dates when they exist." />
         </Grid>
       </Card>
       <Text style={ui.small}>

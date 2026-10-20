@@ -6,12 +6,12 @@ import { RANGE_LABELS, inRange, prettyDate, rangeFor, todayISO, type RangePreset
 import { money, percent, pounds } from '@/domain/format';
 import { toCsv } from '@/domain/csv';
 import { EVENT_LABELS, STAGE_LABELS, eventSummary } from '@/domain/labels';
-import { named, oneParam, pigLabel } from '@/lib/view';
+import { inventoryPigs, named, oneParam, pigLabel } from '@/lib/view';
 import { downloadText } from '@/lib/download';
 import { ui } from '@/theme';
 import { CategoryBars, MoneyChart } from '@/components/Charts';
 import { Gate } from '@/components/Gate';
-import { Button, Card, Chips, DateField, Fields, Page, Select } from '@/components/ui';
+import { Button, Card, Chips, DateField, Fields, Notice, Page, Select } from '@/components/ui';
 
 const VIEWS = [
   { value: 'money', label: 'Money' },
@@ -36,10 +36,13 @@ function Reports({ snap }: { snap: import('@/data/types').Snapshot }) {
   const params = useLocalSearchParams<{ view?: string; preset?: string; from?: string; to?: string; category?: string }>();
   const today = todayISO();
   const view = oneParam(params.view) || 'money';
-  const preset = (oneParam(params.preset) || 'month') as RangePreset;
+  const requested = (oneParam(params.preset) || 'month') as RangePreset;
+  const presetKnown = PRESETS.includes(requested);
+  const preset: RangePreset = presetKnown ? requested : 'month';
   const from = oneParam(params.from);
   const to = oneParam(params.to);
   const category = oneParam(params.category);
+  const rangeInvalid = preset === 'custom' && Boolean(from) && Boolean(to) && from > to;
 
   useEffect(() => {
     if (!params.view || !params.preset) {
@@ -56,41 +59,41 @@ function Reports({ snap }: { snap: import('@/data/types').Snapshot }) {
     router.replace({ pathname: '/reports', params: clean });
   }
 
-  const range = rangeFor(PRESETS.includes(preset) ? preset : 'month', today, { from: from || null, to: to || null });
-  const txns = snap.transactions.filter((txn) => inRange(txn.txnDate, range.from, range.to) && (!category || txn.categoryId === category));
+  const range = rangeInvalid
+    ? { from: from || null, to: from || today }
+    : rangeFor(preset, today, { from: from || null, to: to || null });
+  const txns = rangeInvalid
+    ? []
+    : snap.transactions.filter((txn) => inRange(txn.txnDate, range.from, range.to) && (!category || txn.categoryId === category || (category === 'feed' && txn.txnType === 'feed_purchase')));
   const income = txns.filter((txn) => txn.kind === 'income').reduce((sum, txn) => sum + txn.amountCents, 0);
   const expense = txns.filter((txn) => txn.kind === 'expense').reduce((sum, txn) => sum + txn.amountCents, 0);
-  const buckets = moneyBuckets(
-    txns.map((txn) => ({ kind: txn.kind, date: txn.txnDate, amountCents: txn.amountCents, categoryId: txn.categoryId })),
-    range.from,
-    range.to,
-  );
-  const incomeCats = categoryTotals(
-    txns.map((txn) => ({ kind: txn.kind, date: txn.txnDate, amountCents: txn.amountCents, categoryId: txn.categoryId })),
-    snap.incomeCategories,
-    'income',
-    range.from,
-    range.to,
-  );
+  const moneyRows = txns.map((txn) => ({
+    kind: txn.kind,
+    date: txn.txnDate,
+    amountCents: txn.amountCents,
+    categoryId: txn.txnType === 'feed_purchase' && !txn.categoryId ? 'feed' : txn.categoryId,
+  }));
+  const buckets = moneyBuckets(moneyRows, range.from, range.to);
+  const incomeCats = categoryTotals(moneyRows, snap.incomeCategories, 'income', range.from, range.to);
   const expenseCats = categoryTotals(
-    txns.map((txn) => ({ kind: txn.kind, date: txn.txnDate, amountCents: txn.amountCents, categoryId: txn.categoryId })),
-    snap.expenseCategories,
+    moneyRows,
+    [...snap.expenseCategories, { id: 'feed', name: 'Feed' }],
     'expense',
     range.from,
     range.to,
   );
 
   const events = useMemo(
-    () => snap.events.filter((event) => inRange(event.eventDate, range.from, range.to)),
-    [snap.events, range.from, range.to],
+    () => (rangeInvalid ? [] : snap.events.filter((event) => inRange(event.eventDate, range.from, range.to))),
+    [snap.events, range.from, range.to, rangeInvalid],
   );
-  const moves = snap.feedMoves.filter((move) => inRange(move.moveDate, range.from, range.to));
-  const litters = snap.litters.filter((litter) => inRange(litter.farrowDate, range.from, range.to));
+  const moves = rangeInvalid ? [] : snap.feedMoves.filter((move) => inRange(move.moveDate, range.from, range.to));
+  const litters = rangeInvalid ? [] : snap.litters.filter((litter) => inRange(litter.farrowDate, range.from, range.to));
   const kpis = herdKpis({
     today,
     gestationDays: snap.farm.gestationDays,
     weaningAgeDays: snap.farm.weaningAgeDays,
-    pigs: snap.pigs,
+    pigs: inventoryPigs(snap),
     litters: snap.litters,
     fosters: snap.fosters,
     breedings: snap.events.filter((event) => event.eventType === 'breeding'),
@@ -155,10 +158,12 @@ function Reports({ snap }: { snap: import('@/data/types').Snapshot }) {
     );
   }
 
-  const spanLabel = `${range.from ? prettyDate(range.from) : 'The start'} – ${prettyDate(range.to)}`;
+  const spanLabel = rangeInvalid ? 'Choose a From date on or before the To date.' : `${range.from ? prettyDate(range.from) : 'The start'} – ${prettyDate(range.to)}`;
 
   return (
     <Page title="Reports" lede={`${spanLabel}. Filters live in the address bar, so this view can be shared.`}>
+      {!presetKnown ? <Notice tone="warn" text="That date range is not recognized. Showing this month." /> : null}
+      {rangeInvalid ? <Notice tone="bad" text="The From date has to be on or before the To date." /> : null}
       <Chips options={VIEWS} value={view} onChange={(value) => setQuery({ view: value })} />
       <Chips options={PRESETS.map((value) => ({ value, label: RANGE_LABELS[value] }))} value={preset} onChange={(value) => setQuery({ preset: value })} />
       {preset === 'custom' ? (
@@ -251,6 +256,7 @@ function Reports({ snap }: { snap: import('@/data/types').Snapshot }) {
           <Row label="Farrowing rate" value={percent(kpis.farrowingRate)} />
           <Row label="Pre-wean mortality" value={percent(kpis.preweanMortality)} />
           <Row label="Pigs weaned per sow per year" value={kpis.psy == null ? '—' : kpis.psy.toFixed(1)} />
+          <Row label="Estimated NPD" value={kpis.npd == null ? '—' : kpis.npd.toFixed(0)} />
           <Text style={[ui.h2, { marginTop: 8 }]}>Litters in range</Text>
           <Table
             headers={['Farrowed', 'Sow', 'Alive', 'Weaned']}

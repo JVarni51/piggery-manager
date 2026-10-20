@@ -7,8 +7,10 @@ import { createRepo, HerdError, type Repo } from './repo';
 type HerdValue = {
   status: 'loading' | 'ready' | 'error';
   error: string | null;
+  flash: string | null;
   snap: Snapshot | null;
   refresh: () => Promise<void>;
+  clearFlash: () => void;
   run: (work: (repo: Repo, actor: Actor) => Promise<unknown>) => Promise<void>;
 };
 
@@ -35,6 +37,7 @@ export function resetSession() {
 export function HerdProvider({ children }: { children: ReactNode }) {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const [repo, setRepo] = useState<Repo | null>(null);
 
   useEffect(() => {
@@ -58,7 +61,9 @@ export function HerdProvider({ children }: { children: ReactNode }) {
     return {
       status: error ? 'error' : snap ? 'ready' : 'loading',
       error,
+      flash,
       snap,
+      clearFlash: () => setFlash(null),
       refresh: async () => {
         if (!repo) return;
         setSnap(await repo.load());
@@ -68,13 +73,14 @@ export function HerdProvider({ children }: { children: ReactNode }) {
         try {
           await work(repo, snap.actor);
           setSnap(await repo.load());
+          setFlash('Saved.');
         } catch (reason) {
           if (reason instanceof HerdError) throw reason;
           throw new HerdError(reason instanceof Error ? reason.message : 'That did not save.');
         }
       },
     };
-  }, [error, repo, snap]);
+  }, [error, flash, repo, snap]);
 
   return <HerdContext.Provider value={value}>{children}</HerdContext.Provider>;
 }

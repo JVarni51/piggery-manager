@@ -1,7 +1,8 @@
 import { createElement, useState } from 'react';
 import { Image, Platform, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { can, isSelfOrDescendant, type Gender, type Stage } from '@/domain/herd';
+import { FEMALE_STAGES, MALE_STAGES, can, isSelfOrDescendant, normalizeStage, type Gender, type Stage } from '@/domain/herd';
+import { STAGE_LABELS } from '@/domain/labels';
 import { parseNumber } from '@/domain/format';
 import { todayISO } from '@/domain/dates';
 import type { Pig, PigInput, Snapshot } from '@/data/types';
@@ -9,9 +10,6 @@ import { ui } from '@/theme';
 import { Button, DateField, Field, Fields, Notice, Select } from './ui';
 import { useSave } from './useSave';
 import { pigLabel } from '@/lib/view';
-
-const FEMALE: Stage[] = ['piglet', 'weaner', 'gilt', 'sow'];
-const MALE: Stage[] = ['piglet', 'weaner', 'boar', 'barrow'];
 
 function blank(today: string): PigInput {
   return {
@@ -38,6 +36,7 @@ function blank(today: string): PigInput {
     showTag: '',
     registrationNo: '',
     litterId: null,
+    castrated: false,
   };
 }
 
@@ -66,6 +65,7 @@ export function pigToInput(pig: Pig): PigInput {
     showTag: pig.showTag || '',
     registrationNo: pig.registrationNo || '',
     litterId: pig.litterId,
+    castrated: Boolean(pig.castrated) || pig.stage === 'barrow',
   };
 }
 
@@ -75,18 +75,29 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
   const [form, setForm] = useState<PigInput>(() => (pig ? pigToInput(pig) : blank(todayISO())));
   const [weight, setWeight] = useState(pig?.weightLb != null ? String(pig.weightLb) : '');
   const closed = pig ? ['sold', 'dead', 'culled'].includes(pig.status) : false;
-  const stages = form.gender === 'female' ? FEMALE : MALE;
+  const stages = form.gender === 'female' ? FEMALE_STAGES : MALE_STAGES;
   const family = snap.pigs.map((row) => ({ id: row.id, sireId: row.sireId, damId: row.damId }));
+  const bornBefore = (row: { dob: string | null; id: string }) => {
+    if (!form.dob || !row.dob) return true;
+    return row.dob < form.dob;
+  };
+  const keep = (id: string | null) => Boolean(id) && (id === form.sireId || id === form.damId);
   const sires = snap.pigs.filter(
     (row) =>
       row.gender === 'male' &&
       row.id !== pig?.id &&
+      !row.castrated &&
+      row.stage !== 'barrow' &&
+      row.status === 'active' &&
+      bornBefore(row) &&
       !(pig && isSelfOrDescendant(pig.id, row.id, family)),
   );
   const dams = snap.pigs.filter(
     (row) =>
       row.gender === 'female' &&
       row.id !== pig?.id &&
+      (row.status === 'active' || keep(row.id)) &&
+      bornBefore(row) &&
       !(pig && isSelfOrDescendant(pig.id, row.id, family)),
   );
   const set = (patch: Partial<PigInput>) => setForm((current) => ({ ...current, ...patch }));
@@ -114,8 +125,9 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
           value={form.gender}
           onChange={(gender) => {
             const next = gender as Gender;
-            const allowed = next === 'female' ? FEMALE : MALE;
-            set({ gender: next, stage: allowed.includes(form.stage) ? form.stage : allowed[0] });
+            const allowed = next === 'female' ? FEMALE_STAGES : MALE_STAGES;
+            const stage = normalizeStage(form.stage);
+            set({ gender: next, stage: allowed.includes(stage) ? stage : allowed[0], castrated: next === 'male' ? form.castrated : false });
           }}
           options={[
             { value: 'female', label: 'Female' },
@@ -126,7 +138,7 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
           label="Stage"
           value={form.stage}
           onChange={(stage) => set({ stage: stage as Stage })}
-          options={stages.map((stage) => ({ value: stage, label: stage[0].toUpperCase() + stage.slice(1) }))}
+          options={stages.map((stage) => ({ value: stage, label: STAGE_LABELS[stage] || stage }))}
         />
         <Select
           label="Breed"
@@ -141,6 +153,17 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
           options={[{ value: '', label: 'No group' }, ...snap.groups.map((row) => ({ value: row.id, label: row.name }))]}
         />
         <Field label="Weight (lb)" value={weight} onChange={setWeight} placeholder="262" />
+        {form.gender === 'male' ? (
+          <Select
+            label="Castrated"
+            value={form.castrated ? 'yes' : 'no'}
+            onChange={(value) => set({ castrated: value === 'yes' })}
+            options={[
+              { value: 'no', label: 'Intact' },
+              { value: 'yes', label: 'Castrated (barrow)' },
+            ]}
+          />
+        ) : null}
         <DateField label="Date of birth" value={form.dob || ''} onChange={(dob) => set({ dob })} />
         <DateField label="Farm entry" value={form.entryDate || ''} onChange={(entryDate) => set({ entryDate })} />
         <Field label="Litter number" value={form.litterNumber} onChange={(litterNumber) => set({ litterNumber })} />
@@ -172,7 +195,7 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
         />
         <Field label="Dam, if outside the herd" value={form.damText} onChange={(damText) => set({ damText })} />
       </Fields>
-      <Text style={ui.small}>Sire and dam lists leave out this pig and its descendants. A parent also has to be born first, and the sexes have to match.</Text>
+      <Text style={ui.small}>Sire and dam lists offer active pigs of the right sex who were born first. Castrated males are not sires. This pig and its descendants stay off the list.</Text>
       <Fields>
         <Field label="Ear notch" value={form.earNotch} onChange={(earNotch) => set({ earNotch })} />
         <Field label="Show tag" value={form.showTag} onChange={(showTag) => set({ showTag })} />
