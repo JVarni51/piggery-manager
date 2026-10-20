@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Herdkeep",
+    "slug": "herdkeep",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "herdkeep",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cgranch.herdkeep"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1B2430",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.cgranch.herdkeep",
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "name": "Herdkeep",
+      "shortName": "Herdkeep",
+      "description": "Herd book for CG Ranch show pigs and sows.",
+      "themeColor": "#1B2430",
+      "backgroundColor": "#F4EFE6"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "headers": {
+            "Cross-Origin-Embedder-Policy": "credentialless",
+            "Cross-Origin-Opener-Policy": "same-origin"
+          }
+        }
+      ],
+      "expo-sqlite"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

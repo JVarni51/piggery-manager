@@ -1,0 +1,370 @@
+import { useMemo, useState } from 'react';
+import { Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { can, expectedFarrowDate, heatCheckDate, saleBlockReason, activeWithdrawals } from '@/domain/herd';
+import { centsFromDollars, dollarsInput, parseNumber } from '@/domain/format';
+import { prettyDate, todayISO } from '@/domain/dates';
+import { EVENT_LABELS } from '@/domain/labels';
+import type { EventInput, HerdEvent, Litter, Snapshot } from '@/data/types';
+import { pigLabel } from '@/lib/view';
+import { ui } from '@/theme';
+import { Button, DateField, Field, Fields, Notice, Select } from './ui';
+import { useSave } from './useSave';
+
+export const EVENT_TYPES = [
+  'breeding',
+  'pregnancy_check',
+  'farrowing',
+  'weaning',
+  'castration',
+  'vaccination',
+  'treatment',
+  'deworming',
+  'weight',
+  'sale',
+  'death',
+  'cull',
+  'aborted',
+  'dry_off',
+  'hoof_trim',
+  'tagging',
+  'herd_spray',
+  'foster',
+  'other',
+] as const;
+
+export function blankEvent(pigId = '', eventType = 'weight', eventDate = todayISO()): EventInput {
+  return {
+    pigId,
+    eventType,
+    eventDate,
+    notes: '',
+    weightLb: null,
+    weightContext: 'routine',
+    sireId: null,
+    sireName: '',
+    matingMethod: 'natural',
+    technician: '',
+    breedingEventId: null,
+    pregResult: 'pregnant',
+    pregMethod: 'visual',
+    bornAlive: null,
+    stillborn: 0,
+    mummies: 0,
+    birthWeightLb: null,
+    litterNumber: '',
+    parity: null,
+    weanedCount: null,
+    weanWeightLb: null,
+    litterId: null,
+    drugName: '',
+    dose: '',
+    route: '',
+    withdrawalDays: null,
+    diagnosis: '',
+    symptoms: '',
+    treatedBy: '',
+    vetName: '',
+    vfdNumber: '',
+    vaccineName: '',
+    nextDueDate: null,
+    buyerId: null,
+    buyerName: '',
+    saleAmountCents: null,
+    cause: '',
+    customName: '',
+    markBarrow: true,
+  };
+}
+
+export function eventToInput(event: HerdEvent, litter?: Litter | null): EventInput {
+  return {
+    ...blankEvent(event.pigId || '', event.eventType, event.eventDate),
+    notes: event.notes || '',
+    weightLb: event.weightLb,
+    weightContext: event.weightContext,
+    sireId: event.sireId,
+    sireName: event.sireName || '',
+    matingMethod: event.matingMethod,
+    technician: event.technician || '',
+    breedingEventId: event.breedingEventId,
+    pregResult: event.pregResult,
+    pregMethod: event.pregMethod,
+    bornAlive: event.bornAlive,
+    stillborn: event.stillborn,
+    mummies: event.mummies,
+    birthWeightLb: event.birthWeightLb,
+    litterNumber: litter?.litterNumber || '',
+    parity: litter?.parity ?? null,
+    weanedCount: event.weanedCount,
+    weanWeightLb: event.weanWeightLb,
+    litterId: event.litterId,
+    drugName: event.drugName || '',
+    dose: event.dose || '',
+    route: event.route || '',
+    withdrawalDays: event.withdrawalDays,
+    diagnosis: event.diagnosis || '',
+    symptoms: event.symptoms || '',
+    treatedBy: event.treatedBy || '',
+    vetName: event.vetName || '',
+    vfdNumber: event.vfdNumber || '',
+    vaccineName: event.vaccineName || '',
+    nextDueDate: event.nextDueDate,
+    buyerId: event.buyerId,
+    buyerName: event.buyerName || '',
+    saleAmountCents: event.saleAmountCents,
+    cause: event.cause || '',
+    customName: event.customName || '',
+    markBarrow: false,
+  };
+}
+
+export function EventForm({
+  snap,
+  initial,
+  eventId,
+  lockedPig,
+}: {
+  snap: Snapshot;
+  initial: EventInput;
+  eventId?: string;
+  lockedPig?: boolean;
+}) {
+  const router = useRouter();
+  const { error, busy, submit } = useSave();
+  const [form, setForm] = useState(initial);
+  const [weight, setWeight] = useState(initial.weightLb != null ? String(initial.weightLb) : '');
+  const [born, setBorn] = useState(initial.bornAlive != null ? String(initial.bornAlive) : '');
+  const [still, setStill] = useState(initial.stillborn != null ? String(initial.stillborn) : '0');
+  const [mummies, setMummies] = useState(initial.mummies != null ? String(initial.mummies) : '0');
+  const [birthWeight, setBirthWeight] = useState(initial.birthWeightLb != null ? String(initial.birthWeightLb) : '');
+  const [weaned, setWeaned] = useState(initial.weanedCount != null ? String(initial.weanedCount) : '');
+  const [weanWeight, setWeanWeight] = useState(initial.weanWeightLb != null ? String(initial.weanWeightLb) : '');
+  const [parity, setParity] = useState(initial.parity != null ? String(initial.parity) : '');
+  const [holdDays, setHoldDays] = useState(initial.withdrawalDays != null ? String(initial.withdrawalDays) : '');
+  const [price, setPrice] = useState(dollarsInput(initial.saleAmountCents));
+  const set = (patch: Partial<EventInput>) => setForm((current) => ({ ...current, ...patch }));
+  const type = form.eventType;
+  const pig = snap.pigs.find((row) => row.id === form.pigId);
+  const breedings = snap.events.filter((event) => event.pigId === form.pigId && event.eventType === 'breeding');
+  const litters = snap.litters.filter((litter) => !form.pigId || litter.sowId === form.pigId || litter.id === form.litterId);
+  const boars = snap.pigs.filter((row) => row.gender === 'male' && row.id !== form.pigId);
+  const block = useMemo(() => {
+    if (type !== 'sale' || !form.pigId) return null;
+    return saleBlockReason(activeWithdrawals(snap.events.filter((event) => event.id !== eventId), form.pigId, todayISO()));
+  }, [type, form.pigId, snap.events, eventId]);
+
+  const due = type === 'breeding' && form.eventDate ? expectedFarrowDate(form.eventDate, snap.farm.gestationDays) : null;
+  const heat = type === 'breeding' && form.eventDate ? heatCheckDate(form.eventDate, snap.farm.heatCycleDays) : null;
+
+  return (
+    <View style={{ gap: 12 }}>
+      {error ? <Notice tone="bad" text={error} /> : null}
+      <Text style={ui.small}>
+        Breeding, pregnancy checks, farrowing, weaning, and castration are entered here, in the same book as weights and treatments.
+      </Text>
+      <Fields>
+        <Select
+          label="Pig"
+          value={form.pigId}
+          onChange={(pigId) => set({ pigId, breedingEventId: null, litterId: null })}
+          options={snap.pigs.map((row) => ({ value: row.id, label: pigLabel(row) }))}
+          placeholder="Choose a pig"
+        />
+        <Select
+          label="Event"
+          value={type}
+          onChange={(eventType) => set({ eventType })}
+          options={EVENT_TYPES.map((value) => ({ value, label: EVENT_LABELS[value] || value }))}
+        />
+        <DateField label="Date" value={form.eventDate} onChange={(eventDate) => set({ eventDate })} />
+      </Fields>
+      {lockedPig && pig ? <Text style={ui.small}>This event stays on {pigLabel(pig)}.</Text> : null}
+
+      {type === 'breeding' ? (
+        <View style={{ gap: 12 }}>
+          <Fields>
+            <Select
+              label="Boar"
+              value={form.sireId || ''}
+              onChange={(sireId) => set({ sireId: sireId || null })}
+              options={[{ value: '', label: 'Semen or outside boar' }, ...boars.map((row) => ({ value: row.id, label: pigLabel(row) }))]}
+            />
+            <Field label="Semen or boar name" value={form.sireName} onChange={(sireName) => set({ sireName })} />
+            <Select
+              label="Method"
+              value={form.matingMethod || 'natural'}
+              onChange={(matingMethod) => set({ matingMethod })}
+              options={[
+                { value: 'natural', label: 'Natural' },
+                { value: 'ai', label: 'Artificial insemination' },
+              ]}
+            />
+            <Field label="Technician" value={form.technician} onChange={(technician) => set({ technician })} />
+          </Fields>
+          {due ? (
+            <Notice
+              tone="info"
+              text={`Expected farrow ${prettyDate(due)} (${snap.farm.gestationDays} days). Heat check around ${prettyDate(heat)}. Open breedings follow the current farm gestation if you change it later.`}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      {type === 'pregnancy_check' || type === 'farrowing' || type === 'aborted' ? (
+        <Select
+          label="Breeding this follows"
+          value={form.breedingEventId || ''}
+          onChange={(breedingEventId) => set({ breedingEventId: breedingEventId || null })}
+          options={[
+            { value: '', label: 'Not linked' },
+            ...breedings.map((event) => ({
+              value: event.id,
+              label: `${prettyDate(event.eventDate)} · due ${event.dueDate || '—'}`,
+            })),
+          ]}
+        />
+      ) : null}
+
+      {type === 'pregnancy_check' ? (
+        <Fields>
+          <Select
+            label="Result"
+            value={form.pregResult || 'pregnant'}
+            onChange={(pregResult) => set({ pregResult })}
+            options={[
+              { value: 'pregnant', label: 'Pregnant' },
+              { value: 'open', label: 'Open' },
+              { value: 'unsure', label: 'Unsure' },
+            ]}
+          />
+          <Select
+            label="Method"
+            value={form.pregMethod || 'visual'}
+            onChange={(pregMethod) => set({ pregMethod })}
+            options={[
+              { value: 'visual', label: 'Visual / heat' },
+              { value: 'ultrasound', label: 'Ultrasound' },
+              { value: 'blood', label: 'Blood test' },
+            ]}
+          />
+        </Fields>
+      ) : null}
+
+      {type === 'farrowing' ? (
+        <Fields>
+          <Field label="Born alive" value={born} onChange={setBorn} />
+          <Field label="Stillborn" value={still} onChange={setStill} />
+          <Field label="Mummies" value={mummies} onChange={setMummies} />
+          <Field label="Litter birth weight (lb)" value={birthWeight} onChange={setBirthWeight} />
+          <Field label="Litter number" value={form.litterNumber} onChange={(litterNumber) => set({ litterNumber })} />
+          <Field label="Parity" value={parity} onChange={setParity} />
+        </Fields>
+      ) : null}
+
+      {type === 'weaning' ? (
+        <Fields>
+          <Select
+            label="Litter"
+            value={form.litterId || ''}
+            onChange={(litterId) => set({ litterId: litterId || null })}
+            options={[{ value: '', label: 'Choose a litter' }, ...litters.map((litter) => ({ value: litter.id, label: `${prettyDate(litter.farrowDate)} · born ${litter.bornAlive}` }))]}
+          />
+          <Field label="Weaned" value={weaned} onChange={setWeaned} />
+          <Field label="Wean weight (lb)" value={weanWeight} onChange={setWeanWeight} />
+        </Fields>
+      ) : null}
+
+      {type === 'castration' ? (
+        <Select
+          label="After castration"
+          value={form.markBarrow ? 'barrow' : 'keep'}
+          onChange={(value) => set({ markBarrow: value === 'barrow' })}
+          options={[
+            { value: 'barrow', label: 'Mark this pig as a barrow' },
+            { value: 'keep', label: 'Leave the stage unchanged' },
+          ]}
+        />
+      ) : null}
+
+      {type === 'weight' ? (
+        <Fields>
+          <Field label="Weight (lb)" value={weight} onChange={setWeight} />
+          <Select
+            label="Context"
+            value={form.weightContext || 'routine'}
+            onChange={(weightContext) => set({ weightContext })}
+            options={[
+              { value: 'routine', label: 'Routine' },
+              { value: 'show', label: 'Show weigh-in' },
+              { value: 'wean', label: 'Weaning' },
+              { value: 'sale', label: 'Sale' },
+            ]}
+          />
+        </Fields>
+      ) : null}
+
+      {type === 'treatment' || type === 'deworming' || type === 'vaccination' ? (
+        <View style={{ gap: 12 }}>
+          <Text style={ui.small}>Record what the ranch gave. Herdkeep does not suggest a dose.</Text>
+          <Fields>
+            {type === 'vaccination' ? (
+              <Field label="Vaccine" value={form.vaccineName} onChange={(vaccineName) => set({ vaccineName })} />
+            ) : (
+              <Field label="Product" value={form.drugName} onChange={(drugName) => set({ drugName })} />
+            )}
+            <Field label="Dose recorded" value={form.dose} onChange={(dose) => set({ dose })} />
+            <Field label="Route" value={form.route} onChange={(route) => set({ route })} placeholder="IM, oral…" />
+            <Field label="Withdrawal days" value={holdDays} onChange={setHoldDays} />
+            <DateField label="Next due" value={form.nextDueDate || ''} onChange={(nextDueDate) => set({ nextDueDate: nextDueDate || null })} />
+            <Field label="Given by" value={form.treatedBy} onChange={(treatedBy) => set({ treatedBy })} />
+            <Field label="Veterinarian" value={form.vetName} onChange={(vetName) => set({ vetName })} />
+            <Field label="Diagnosis" value={form.diagnosis} onChange={(diagnosis) => set({ diagnosis })} />
+          </Fields>
+        </View>
+      ) : null}
+
+      {type === 'sale' ? (
+        <View style={{ gap: 12 }}>
+          {block ? <Notice tone="bad" text={block} /> : null}
+          <Fields>
+            <Field label="Buyer" value={form.buyerName} onChange={(buyerName) => set({ buyerName })} />
+            <Field label="Price (USD)" value={price} onChange={setPrice} placeholder="450.00" />
+          </Fields>
+          <Text style={ui.small}>A sale needs a buyer and a price above zero. It also writes the income row and marks the pig sold.</Text>
+        </View>
+      ) : null}
+
+      {type === 'death' || type === 'cull' ? <Field label="Cause" value={form.cause} onChange={(cause) => set({ cause })} /> : null}
+
+      {type === 'other' || type === 'hoof_trim' || type === 'tagging' || type === 'herd_spray' || type === 'dry_off' || type === 'foster' ? (
+        <Field label="Name" value={form.customName} onChange={(customName) => set({ customName })} />
+      ) : null}
+
+      <Field label="Notes" value={form.notes} onChange={(notes) => set({ notes })} multiline />
+      <Button
+        label={busy ? 'Saving…' : eventId ? 'Save event' : 'Add event'}
+        disabled={busy || !can(snap.actor.role, 'write')}
+        onPress={() => {
+          const next: EventInput = {
+            ...form,
+            weightLb: parseNumber(weight),
+            bornAlive: parseNumber(born),
+            stillborn: parseNumber(still) ?? 0,
+            mummies: parseNumber(mummies) ?? 0,
+            birthWeightLb: parseNumber(birthWeight),
+            weanedCount: parseNumber(weaned),
+            weanWeightLb: parseNumber(weanWeight),
+            parity: parseNumber(parity),
+            withdrawalDays: parseNumber(holdDays),
+            saleAmountCents: centsFromDollars(price),
+          };
+          void submit(async (repo, actor) => {
+            const id = await repo.saveEvent(actor, next, eventId);
+            router.replace(form.pigId ? `/pigs/${form.pigId}` : `/events/${id}`);
+          });
+        }}
+      />
+    </View>
+  );
+}
