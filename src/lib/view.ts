@@ -74,7 +74,9 @@ export function openBreeding(events: HerdEvent[], pigId: string, gestationDays: 
 }
 
 export function parityOf(snap: Snapshot, pigId: string): number {
-  return snap.litters.filter((litter) => litter.sowId === pigId).length;
+  const litters = snap.litters.filter((litter) => litter.sowId === pigId);
+  const recorded = litters.reduce((max, litter) => Math.max(max, litter.parity ?? 0), 0);
+  return Math.max(recorded, litters.length);
 }
 
 export function pigSummary(snap: Snapshot, pig: Pig, today = todayISO()) {

@@ -21,17 +21,11 @@ async function openExpo(): Promise<HerdDb> {
 }
 
 export async function openHerdDatabase(): Promise<HerdDb> {
-  if (Platform.OS !== 'web') return openExpo();
-  const isolated = typeof crossOriginIsolated === 'boolean' && crossOriginIsolated;
-  if (isolated) {
-    try {
-      const database = await openExpo();
-      await database.get('SELECT 1 as ok');
-      return database;
-    } catch (error) {
-      console.warn('expo-sqlite is unavailable in this browser. Using the sql.js fallback.', error);
-    }
+  // Web uses sql.js. expo-sqlite's wa-sqlite asset is not served as wasm by the
+  // dev server, and a failed instantiate takes down the page. Native keeps expo-sqlite.
+  if (Platform.OS === 'web') {
+    const web = await import('./sqljs');
+    return web.openBrowserSql();
   }
-  const web = await import('./sqljs');
-  return web.openBrowserSql();
+  return openExpo();
 }

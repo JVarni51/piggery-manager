@@ -13,7 +13,7 @@ npm run web
 
 The dev server listens on port 4457. Open [http://127.0.0.1:4457](http://127.0.0.1:4457).
 
-Data stays in the browser. When the page is cross-origin isolated, Herdkeep uses `expo-sqlite`. Otherwise it uses sql.js and IndexedDB. Either way the herd book is on that device only.
+Data stays in the browser through sql.js and IndexedDB. The iOS and Android builds use `expo-sqlite`. Either way the herd book is on that device only.
 
 ## Expo Go
 

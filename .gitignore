@@ -42,3 +42,4 @@ yarn-error.*
 
 # copied from sql.js on postinstall
 public/sql-wasm.wasm
+public/sql-wasm-browser.wasm
