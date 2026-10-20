@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { can, expectedFarrowDate, heatCheckDate, planBreedingHeat, saleBlockReason, activeWithdrawals } from '@/domain/herd';
+import { can, expectedFarrowDate, farrowingWarnings, heatCheckDate, parityForFarrow, planBreedingHeat, saleBlockReason, activeWithdrawals } from '@/domain/herd';
 import { centsFromDollars, dollarsInput, parseNumber } from '@/domain/format';
 import { prettyDate, todayISO } from '@/domain/dates';
 import { EVENT_LABELS } from '@/domain/labels';
@@ -152,7 +152,6 @@ export function EventForm({
   const [birthWeight, setBirthWeight] = useState(initial.birthWeightLb != null ? String(initial.birthWeightLb) : '');
   const [weaned, setWeaned] = useState(initial.weanedCount != null ? String(initial.weanedCount) : '');
   const [weanWeight, setWeanWeight] = useState(initial.weanWeightLb != null ? String(initial.weanWeightLb) : '');
-  const [parity, setParity] = useState(initial.parity != null ? String(initial.parity) : '');
   const [holdDays, setHoldDays] = useState(initial.withdrawalDays != null ? String(initial.withdrawalDays) : '');
   const [price, setPrice] = useState(dollarsInput(initial.saleAmountCents));
   const set = (patch: Partial<EventInput>) => setForm((current) => ({ ...current, ...patch }));
@@ -192,6 +191,27 @@ export function EventForm({
 
   const due = type === 'breeding' && form.eventDate ? expectedFarrowDate(form.eventDate, snap.farm.gestationDays) : null;
   const heat = type === 'breeding' && form.eventDate ? heatCheckDate(form.eventDate, snap.farm.heatCycleDays) : null;
+  const futureDate = Boolean(form.eventDate && form.eventDate > todayISO());
+  const countedParity =
+    type === 'farrowing' && form.pigId && form.eventDate
+      ? parityForFarrow(
+          snap.litters.filter((litter) => litter.sowId === form.pigId && litter.id !== form.litterId).map((litter) => litter.farrowDate),
+          form.eventDate,
+        )
+      : null;
+  const farrowNotes =
+    type === 'farrowing' && form.pigId && form.eventDate
+      ? farrowingWarnings({
+          eventDate: form.eventDate,
+          otherFarrowDates: snap.litters.filter((litter) => litter.sowId === form.pigId && litter.id !== form.litterId).map((litter) => litter.farrowDate),
+          serviceDate:
+            snap.events.find((event) => event.id === form.breedingEventId)?.eventDate ||
+            snap.events
+              .filter((event) => event.pigId === form.pigId && event.eventType === 'breeding' && event.eventDate <= form.eventDate)
+              .sort((a, b) => a.eventDate.localeCompare(b.eventDate))
+              .at(-1)?.eventDate,
+        })
+      : [];
 
   return (
     <View style={{ gap: 12 }}>
@@ -216,6 +236,10 @@ export function EventForm({
         <DateField label="Date" value={form.eventDate} onChange={(eventDate) => set({ eventDate })} />
       </Fields>
       {lockedPig && pig ? <Text style={ui.small}>This event stays on {pigLabel(pig)}.</Text> : null}
+      {futureDate ? <Notice tone="warn" text="That date is still in the future. Events have to be on or before today." /> : null}
+      {farrowNotes.map((text) => (
+        <Notice key={text} tone="warn" text={text} />
+      ))}
 
       {type === 'breeding' ? (
         <View style={{ gap: 12 }}>
@@ -300,9 +324,9 @@ export function EventForm({
           <Field label="Mummified" value={mummies} onChange={setMummies} />
           <Field label="Litter birth weight (lb)" value={birthWeight} onChange={setBirthWeight} />
           <Field label="Litter number" value={form.litterNumber} onChange={(litterNumber) => set({ litterNumber })} />
-          <Field label="Parity (blank uses recorded farrowings)" value={parity} onChange={setParity} />
         </Fields>
       ) : null}
+      {countedParity != null ? <Text style={ui.small}>Parity {countedParity}. Counted from this sow’s recorded farrowings.</Text> : null}
 
       {type === 'weaning' ? (
         <Fields>
@@ -403,7 +427,7 @@ export function EventForm({
       <Field label="Notes" value={form.notes} onChange={(notes) => set({ notes })} multiline />
       <Button
         label={busy ? 'Saving…' : eventId ? 'Save event' : 'Add event'}
-        disabled={busy || !can(snap.actor.role, 'write') || Boolean(block)}
+        disabled={busy || !can(snap.actor.role, 'write') || Boolean(block) || futureDate}
         onPress={() => {
           const next: EventInput = {
             ...form,
@@ -414,7 +438,7 @@ export function EventForm({
             birthWeightLb: parseNumber(birthWeight),
             weanedCount: parseNumber(weaned),
             weanWeightLb: parseNumber(weanWeight),
-            parity: parseNumber(parity),
+            parity: null,
             withdrawalDays: parseNumber(holdDays),
             saleAmountCents: centsFromDollars(price),
           };

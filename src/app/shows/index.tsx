@@ -4,7 +4,9 @@ import { activeWithdrawals, can, showEntryBlock, showPace } from '@/domain/herd'
 import { paceLabel } from '@/domain/herd';
 import { adgLabel, centsFromDollars, dollarsInput, parseNumber, pounds } from '@/domain/format';
 import { prettyDate, todayISO } from '@/domain/dates';
-import { pigLabel, weightPoints } from '@/lib/view';
+import { toCsv } from '@/domain/csv';
+import { downloadText } from '@/lib/download';
+import { named, pigLabel, weightPoints } from '@/lib/view';
 import type { Show, ShowEntry, Snapshot } from '@/data/types';
 import { ui } from '@/theme';
 import { Gate } from '@/components/Gate';
@@ -47,7 +49,42 @@ function Shows({ snap }: { snap: Snapshot }) {
   const hold = pigId && selected ? showEntryBlock(activeWithdrawals(snap.events, pigId, selected.showDate), selected.showDate) : { block: null, warn: null };
 
   return (
-    <Page title="Shows" lede="Pace uses the last two weights against the days left and the target. A withdrawal that runs through show day blocks the entry, the weigh-in, and a show sale. Clear the day after the withdrawal ends.">
+    <Page
+      title="Shows"
+      lede="Pace uses the last two weights against the days left and the target. A withdrawal that runs through show day blocks the entry, the weigh-in, and a show sale. Clear the day after the withdrawal ends."
+      action={
+        <Button
+          tone="secondary"
+          label="Download CSV"
+          onPress={() => {
+            void downloadText(
+              'herdkeep-shows.csv',
+              toCsv(
+                ['Show', 'Date', 'Location', 'Show target', 'Pig', 'Class', 'Division', 'Weight class', 'Entry target', 'Weigh-in', 'Buyer', 'Sale', 'Add-ons'],
+                snap.entries.map((entry) => {
+                  const show = snap.shows.find((row) => row.id === entry.showId);
+                  return [
+                    show?.name,
+                    show?.showDate,
+                    show?.location,
+                    show?.targetWeightLb,
+                    pigLabel(snap.pigs.find((pig) => pig.id === entry.pigId)),
+                    entry.className,
+                    entry.division,
+                    entry.weightClass,
+                    entry.targetWeightLb,
+                    entry.weighInLb,
+                    named(snap.contacts, entry.buyerContactId),
+                    entry.saleCents != null ? (entry.saleCents / 100).toFixed(2) : '',
+                    entry.addonCents != null ? (entry.addonCents / 100).toFixed(2) : '',
+                  ];
+                }),
+              ),
+            );
+          }}
+        />
+      }
+    >
       {error ? <Notice tone="bad" text={error} /> : null}
       {shows.map((show) => {
         const entries = snap.entries.filter((entry) => entry.showId === show.id);

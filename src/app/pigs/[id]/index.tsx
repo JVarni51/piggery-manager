@@ -95,8 +95,8 @@ function Detail({ pigId }: { pigId: string }) {
             <Card>
               <Text style={ui.h2}>Where this pig stands</Text>
               <Line k="Status" v={STATUS_LABELS[pig.status] || pig.status} />
-              <Line k="Expected farrow" v={summary.breeding ? prettyDate(summary.breeding.due) : 'Not gestating'} />
-              <Line k="Parity" v={String(summary.parity)} />
+              {pig.gender === 'female' ? <Line k="Expected farrow" v={summary.breeding ? prettyDate(summary.breeding.due) : 'Not gestating'} /> : null}
+              {pig.gender === 'female' ? <Line k="Parity" v={String(summary.parity)} /> : null}
               <Line k="Last weight" v={summary.lastWeight ? `${pounds(summary.lastWeight.lb, 1)} on ${prettyDate(summary.lastWeight.date)}` : pounds(pig.weightLb, 1)} />
               <Line k="Recent gain" v={adgLabel(summary.adg)} />
               {summary.holds[0] ? (

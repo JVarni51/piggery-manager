@@ -43,6 +43,10 @@ function List({ snap, kind, title, href }: { snap: Snapshot; kind: 'income' | 'e
   });
   const total = rows.reduce((sum, txn) => sum + txn.amountCents, 0);
   const categories = kind === 'income' ? snap.incomeCategories : snap.expenseCategories;
+  const categoryTotals = rollup(rows, (txn) => (txn.txnType === 'feed_purchase' ? 'feed' : txn.categoryId || 'none'), (txn) =>
+    txn.txnType === 'feed_purchase' ? 'Feed' : named(categories, txn.categoryId),
+  );
+  const typeTotals = rollup(rows, (txn) => txn.txnType, (txn) => titleCase(txn.txnType));
   const lede =
     kind === 'expense'
       ? `${money(total)} across ${rows.length} rows. Feed purchases share one stock movement, so they are not entered again under Feed.`
@@ -91,6 +95,24 @@ function List({ snap, kind, title, href }: { snap: Snapshot; kind: 'income' | 'e
         />
       </Fields>
       {rangeError ? <Notice tone="bad" text={rangeError} /> : null}
+      <Card>
+        <Text style={ui.h2}>By category</Text>
+        {categoryTotals.length === 0 ? <Text style={ui.small}>Nothing in this list.</Text> : null}
+        {categoryTotals.map((row) => (
+          <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, minHeight: 32 }}>
+            <Text style={ui.body}>{row.label}</Text>
+            <Text style={ui.body}>{money(row.cents)}</Text>
+          </View>
+        ))}
+        <Text style={[ui.h2, { marginTop: 8 }]}>By type</Text>
+        {typeTotals.length === 0 ? <Text style={ui.small}>Nothing in this list.</Text> : null}
+        {typeTotals.map((row) => (
+          <View key={row.label} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, minHeight: 32 }}>
+            <Text style={ui.body}>{row.label}</Text>
+            <Text style={ui.body}>{money(row.cents)}</Text>
+          </View>
+        ))}
+      </Card>
       {rows.length === 0 ? <Empty title={`No ${kind} yet`} body="Sales from the event form land here automatically." /> : null}
       <StackList
         rows={rows.map((txn) => ({
@@ -148,4 +170,15 @@ export function MoneyEdit({ kind, id }: { kind: 'income' | 'expense'; id?: strin
       }}
     </Gate>
   );
+}
+
+function rollup<T>(rows: T[], keyOf: (row: T) => string, labelOf: (row: T) => string): { label: string; cents: number }[] {
+  const totals = new Map<string, { label: string; cents: number }>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    const current = totals.get(key) || { label: labelOf(row), cents: 0 };
+    current.cents += (row as { amountCents: number }).amountCents;
+    totals.set(key, current);
+  }
+  return [...totals.values()].sort((a, b) => b.cents - a.cents || a.label.localeCompare(b.label));
 }

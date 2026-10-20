@@ -118,8 +118,8 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
       {error ? <Notice tone="bad" text={error} /> : null}
       <Text style={ui.small}>Tag numbers are edited in this same herd book. Each tag has to be unique on the farm.</Text>
       <Fields>
-        <Field label="Tag" value={form.tag} onChange={(tag) => set({ tag })} placeholder="26-14" />
-        <Field label="Name" value={form.name} onChange={(name) => set({ name })} placeholder="Ticker" />
+        <Field label="Tag" value={form.tag} onChange={(tag) => set({ tag })} placeholder="Tag number" />
+        <Field label="Name" value={form.name} onChange={(name) => set({ name })} placeholder="Name" />
         <Select
           label="Sex"
           value={form.gender}
@@ -137,7 +137,10 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
         <Select
           label="Stage"
           value={form.stage}
-          onChange={(stage) => set({ stage: stage as Stage })}
+          onChange={(stage) => {
+            const next = stage as Stage;
+            set({ stage: next, castrated: next === 'barrow' ? true : next === 'boar' ? false : form.castrated });
+          }}
           options={stages.map((stage) => ({ value: stage, label: STAGE_LABELS[stage] || stage }))}
         />
         <Select
@@ -152,7 +155,7 @@ export function PigForm({ snap, pig }: { snap: Snapshot; pig?: Pig }) {
           onChange={(groupId) => set({ groupId: groupId || null })}
           options={[{ value: '', label: 'No group' }, ...snap.groups.map((row) => ({ value: row.id, label: row.name }))]}
         />
-        <Field label="Weight (lb)" value={weight} onChange={setWeight} placeholder="262" />
+        <Field label="Weight (lb)" value={weight} onChange={setWeight} placeholder="Pounds" />
         {form.gender === 'male' ? (
           <Select
             label="Castrated"

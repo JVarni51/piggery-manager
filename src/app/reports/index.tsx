@@ -82,7 +82,7 @@ function Reports({ snap }: { snap: import('@/data/types').Snapshot }) {
     amountCents: txn.amountCents,
     categoryId: txn.txnType === 'feed_purchase' && !txn.categoryId ? 'feed' : txn.categoryId,
   }));
-  const buckets = moneyBuckets(moneyRows, range.from, range.to);
+  const buckets = rangeInvalid ? [] : moneyBuckets(moneyRows, range.from, range.to);
   const incomeCats = categoryTotals(moneyRows, snap.incomeCategories, 'income', range.from, range.to);
   const expenseCats = categoryTotals(
     moneyRows,

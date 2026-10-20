@@ -92,8 +92,7 @@ export function StageChart({
 }
 
 export function MoneyChart({ buckets }: { buckets: MoneyBucket[] }) {
-  const shown = buckets.filter((bucket, index) => bucket.incomeCents || bucket.expenseCents || index === buckets.length - 1);
-  const rows = shown.length ? shown : buckets.slice(-12);
+  const rows = buckets.filter((bucket) => bucket.incomeCents || bucket.expenseCents);
   if (!rows.length) return <Text style={ui.body}>No income or expenses in this range.</Text>;
   const max = Math.max(1, ...rows.map((row) => Math.max(row.incomeCents, row.expenseCents)));
   const groupWidth = 46;

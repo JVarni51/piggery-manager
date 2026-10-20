@@ -227,11 +227,11 @@ export function buildSeed(today: string): SeedRow[] {
       wean_date: row.wean_date ? day(String(row.wean_date)) : null,
     });
 
-  litter({ id: ID.litHazelJan, sow_id: ID.hazel, sire_id: ID.redford, breeding_event_id: ID.brHazelJan, farrow_date: '2026-01-20', parity: 2, born_alive: 11, stillborn: 1, mummies: 0, weaned_count: 9, wean_date: '2026-02-10', wean_weight_lb: 220, litter_number: 'H-4' });
-  litter({ id: ID.litClem, sow_id: ID.clementine, sire_id: ID.redford, breeding_event_id: ID.brClem, farrow_date: '2026-04-12', parity: 5, born_alive: 10, stillborn: 1, mummies: 0, weaned_count: 9, wean_date: '2026-05-03', wean_weight_lb: 190, litter_number: 'C-5' });
-  litter({ id: ID.litJun, sow_id: ID.juniper, sire_id: ID.boone, breeding_event_id: ID.brJun, farrow_date: '2026-04-18', parity: 4, born_alive: 9, stillborn: 0, mummies: 1, weaned_count: 9, wean_date: '2026-05-09', wean_weight_lb: 175, litter_number: 'J-4' });
-  litter({ id: ID.litWilla, sow_id: ID.willa, sire_id: ID.boone, breeding_event_id: ID.brWillaSpring, farrow_date: '2026-05-01', parity: 2, born_alive: 8, stillborn: 0, mummies: 0, weaned_count: 8, wean_date: '2026-05-22', wean_weight_lb: 150, litter_number: 'W-2' });
-  litter({ id: ID.litHazelSep, sow_id: ID.hazel, sire_id: ID.redford, breeding_event_id: ID.brHazelFall, farrow_date: '2026-09-22', parity: 3, born_alive: 12, stillborn: 1, mummies: 0, weaned_count: 10, wean_date: '2026-10-13', wean_weight_lb: 310, litter_number: 'H-5' });
+  litter({ id: ID.litHazelJan, sow_id: ID.hazel, sire_id: ID.redford, breeding_event_id: ID.brHazelJan, farrow_date: '2026-01-20', parity: 1, born_alive: 11, stillborn: 1, mummies: 0, weaned_count: 9, wean_date: '2026-02-10', wean_weight_lb: 220, litter_number: 'H-4' });
+  litter({ id: ID.litClem, sow_id: ID.clementine, sire_id: ID.redford, breeding_event_id: ID.brClem, farrow_date: '2026-04-12', parity: 1, born_alive: 10, stillborn: 1, mummies: 0, weaned_count: 9, wean_date: '2026-05-03', wean_weight_lb: 190, litter_number: 'C-5' });
+  litter({ id: ID.litJun, sow_id: ID.juniper, sire_id: ID.boone, breeding_event_id: ID.brJun, farrow_date: '2026-04-18', parity: 1, born_alive: 9, stillborn: 0, mummies: 1, weaned_count: 9, wean_date: '2026-05-09', wean_weight_lb: 175, litter_number: 'J-4' });
+  litter({ id: ID.litWilla, sow_id: ID.willa, sire_id: ID.boone, breeding_event_id: ID.brWillaSpring, farrow_date: '2026-05-01', parity: 1, born_alive: 8, stillborn: 0, mummies: 0, weaned_count: 8, wean_date: '2026-05-22', wean_weight_lb: 150, litter_number: 'W-2' });
+  litter({ id: ID.litHazelSep, sow_id: ID.hazel, sire_id: ID.redford, breeding_event_id: ID.brHazelFall, farrow_date: '2026-09-22', parity: 2, born_alive: 12, stillborn: 1, mummies: 0, weaned_count: 10, wean_date: '2026-10-13', wean_weight_lb: 310, litter_number: 'H-5' });
 
   add('foster_moves', {
     id: seedId(951),

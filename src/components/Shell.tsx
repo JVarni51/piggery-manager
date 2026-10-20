@@ -66,37 +66,11 @@ export function Shell({ children }: { children: ReactNode }) {
             </View>
           ) : null}
           <View style={{ flex: 1 }}>{children}</View>
-          {narrow && fab ? <Sticky href={fab.href} label={fab.label} bottom={64 + insets.bottom} /> : null}
         </View>
-        {narrow ? <BottomNav path={path} bottom={insets.bottom} onMore={() => setMenu(true)} /> : null}
+        {narrow ? <BottomNav path={path} bottom={insets.bottom} onMore={() => setMenu(true)} fab={fab} /> : null}
         {narrow && menu ? <Sidebar path={path} onNavigate={() => setMenu(false)} overlay /> : null}
       </View>
     </FabContext.Provider>
-  );
-}
-
-function Sticky({ href, label, bottom }: { href: string; label: string; bottom: number }) {
-  const router = useRouter();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={() => router.push(href)}
-      style={{
-        position: 'absolute',
-        right: 16,
-        bottom,
-        minHeight: 52,
-        paddingHorizontal: 18,
-        borderRadius: 26,
-        backgroundColor: colors.copper,
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 5,
-      }}
-    >
-      <Text style={{ color: colors.white, fontFamily: sans, fontWeight: '700', fontSize: 16 }}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -278,7 +252,7 @@ function Sidebar({ path, onNavigate, overlay }: { path: string; onNavigate: () =
   );
 }
 
-function BottomNav({ path, bottom, onMore }: { path: string; bottom: number; onMore: () => void }) {
+function BottomNav({ path, bottom, onMore, fab }: { path: string; bottom: number; onMore: () => void; fab: Fab }) {
   const router = useRouter();
   const items = [
     { href: '/', label: 'Today' },
@@ -312,6 +286,16 @@ function BottomNav({ path, bottom, onMore }: { path: string; bottom: number; onM
       <Pressable accessibilityRole="button" accessibilityLabel="More" onPress={onMore} style={{ flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center' }}>
         <Text style={{ color: '#E7D7C6', fontFamily: sans, fontWeight: '700', fontSize: 13 }}>More</Text>
       </Pressable>
+      {fab ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={fab.label}
+          onPress={() => router.push(fab.href)}
+          style={{ minHeight: 56, paddingHorizontal: 14, backgroundColor: colors.copper, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Text style={{ color: colors.white, fontFamily: sans, fontWeight: '700', fontSize: 13 }}>Add</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

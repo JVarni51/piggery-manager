@@ -8,6 +8,7 @@ import {
   isSelfOrDescendant,
   normalizeStage,
   parentAgeProblem,
+  assignedBreedingIds,
   parityForFarrow,
   planBreedingHeat,
   roleLabel,
@@ -203,8 +204,33 @@ export function createRepo(db: HerdDb) {
       await db.exec(`UPDATE pigs SET castrated = 1 WHERE stage = 'barrow' AND IFNULL(castrated, 0) = 0`);
       await setMeta('stage_model', '2');
     }
+    if ((await meta('parity_model')) !== '2') {
+      await recomputeParity();
+      await setMeta('parity_model', '2');
+    }
     await db.flush();
     return load();
+  }
+
+  async function recomputeParity(sowId?: string) {
+    const rows = await db.all<{ id: string; sow_id: string; farrow_date: string }>(
+      sowId
+        ? `SELECT id, sow_id, farrow_date FROM litters WHERE deleted_at IS NULL AND sow_id = ?`
+        : `SELECT id, sow_id, farrow_date FROM litters WHERE deleted_at IS NULL`,
+      sowId ? [sowId] : undefined,
+    );
+    const bySow = new Map<string, { id: string; farrow_date: string }[]>();
+    for (const row of rows) {
+      const list = bySow.get(row.sow_id) || [];
+      list.push(row);
+      bySow.set(row.sow_id, list);
+    }
+    for (const list of bySow.values()) {
+      list.sort((a, b) => String(a.farrow_date).localeCompare(String(b.farrow_date)) || a.id.localeCompare(b.id));
+      for (let index = 0; index < list.length; index += 1) {
+        await db.run(`UPDATE litters SET parity = ? WHERE id = ?`, [index + 1, list[index].id]);
+      }
+    }
   }
 
   function stamp(actor: Actor, created = false) {
@@ -404,9 +430,7 @@ export function createRepo(db: HerdDb) {
       const block = saleBlockReason(activeWithdrawals(events.filter((event) => event.id !== id), pig.id, input.eventDate));
       if (block) throw new HerdError(block);
     }
-    if ((type === 'farrowing' || type === 'weaning') && input.eventDate > todayISO()) {
-      throw new HerdError('Farrowing and weaning have to be on or before today.');
-    }
+    if (input.eventDate > todayISO()) throw new HerdError('Events have to be on or before today.');
     if ((type === 'death' || type === 'cull') && !input.cause.trim()) throw new HerdError('A death or cull needs a cause.');
     if (type === 'weight' && (input.weightLb == null || input.weightLb <= 0)) throw new HerdError('Enter the weight in pounds.');
     if (type === 'treatment' && !input.drugName.trim()) throw new HerdError('Enter the drug that was given.');
@@ -465,6 +489,29 @@ export function createRepo(db: HerdDb) {
       heatId = plan.heatId;
       returnedServiceIds = plan.returnedServiceIds;
     }
+    let breedingEventId = input.breedingEventId;
+    if (type === 'farrowing' && !breedingEventId) {
+      const history = await many<HerdEvent>('SELECT * FROM events WHERE deleted_at IS NULL AND pig_id = ? AND id != ?', [pig.id, eventId]);
+      const services = history
+        .filter((event) => event.eventType === 'breeding')
+        .map((event) => ({ id: event.id, pigId: event.pigId, eventDate: event.eventDate, heatId: event.heatId }));
+      const outcomes = history
+        .filter((event) => event.eventType === 'farrowing' || event.eventType === 'aborted' || event.eventType === 'pregnancy_check')
+        .map((event) => ({
+          id: event.id,
+          pigId: event.pigId,
+          eventType: event.eventType,
+          eventDate: event.eventDate,
+          breedingEventId: event.breedingEventId,
+          pregResult: event.pregResult,
+        }));
+      const draftId = `draft-${eventId}`;
+      const assigned = assignedBreedingIds(services, [
+        ...outcomes,
+        { id: draftId, pigId: pig.id, eventType: 'farrowing', eventDate: input.eventDate, breedingEventId: null, pregResult: null },
+      ]);
+      breedingEventId = assigned.get(draftId) ?? null;
+    }
     let sireName = blankToNull(input.sireName);
     if (input.sireId) {
       const sire = await one<Pig>('SELECT * FROM pigs WHERE id = ?', [input.sireId]);
@@ -484,7 +531,7 @@ export function createRepo(db: HerdDb) {
       technician: blankToNull(input.technician),
       due_date: dueDate,
       heat_id: type === 'breeding' ? heatId : existing?.heatId ?? null,
-      breeding_event_id: input.breedingEventId,
+      breeding_event_id: breedingEventId,
       preg_result: input.pregResult,
       preg_method: input.pregMethod,
       born_alive: input.bornAlive,
@@ -546,21 +593,18 @@ export function createRepo(db: HerdDb) {
 
     if (type === 'farrowing') {
       let litterId = input.litterId || existing?.litterId || null;
-      let parity = input.parity;
-      if (parity == null) {
-        const prior = await db.all<{ farrow_date: string }>(
-          `SELECT farrow_date FROM litters WHERE deleted_at IS NULL AND sow_id = ? AND id != ?`,
-          [input.pigId, litterId || ''],
-        );
-        parity = parityForFarrow(
-          prior.map((row) => String(row.farrow_date)),
-          input.eventDate,
-        );
-      }
+      const prior = await db.all<{ farrow_date: string }>(
+        `SELECT farrow_date FROM litters WHERE deleted_at IS NULL AND sow_id = ? AND id != ?`,
+        [input.pigId, litterId || ''],
+      );
+      const parity = parityForFarrow(
+        prior.map((row) => String(row.farrow_date)),
+        input.eventDate,
+      );
       const litterFields: Record<string, SqlValue> = {
         sow_id: input.pigId,
         sire_id: input.sireId,
-        breeding_event_id: input.breedingEventId,
+        breeding_event_id: breedingEventId,
         farrow_date: input.eventDate,
         parity,
         born_alive: input.bornAlive ?? 0,
@@ -578,6 +622,7 @@ export function createRepo(db: HerdDb) {
         await patch('litters', litterId, litterFields);
       }
       if (pig.stage === 'gilt') await patch('pigs', pig.id, { stage: 'sow', ...stamp(actor) });
+      await recomputeParity(input.pigId);
     }
 
     if (type === 'weaning' && input.litterId) {
@@ -676,6 +721,7 @@ export function createRepo(db: HerdDb) {
     assertCan(actor, 'write');
     const current = await farm();
     if (!input.eventDate) throw new HerdError('Event date is required.');
+    if (input.eventDate > todayISO()) throw new HerdError('Events have to be on or before today.');
     let pigIds = [...new Set(input.pigIds)];
     if (pigIds.length === 0 && input.groupId) {
       const rows = await db.all<{ id: string }>(

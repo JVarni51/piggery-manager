@@ -99,6 +99,7 @@ function GroupForm({ snap, id, pigs }: { snap: Snapshot; id: string; pigs: strin
           <Field label="VFD document link" value={vfdDoc} onChange={setVfdDoc} />
           <Field label="Cost (USD, optional)" value={cost} onChange={setCost} />
         </Fields>
+        {eventDate > todayISO() ? <Notice tone="warn" text="That date is still in the future. Events have to be on or before today." /> : null}
         <Text style={ui.small}>A cost becomes one veterinary expense for the group, not a charge on every pig. Withdrawal days apply to every pig covered, including sprays. Keep VFD copies for 2 years.</Text>
         <Field label="Notes" value={notes} onChange={setNotes} multiline />
         <Text style={ui.label}>Pigs covered ({pigIds.length})</Text>
@@ -110,7 +111,7 @@ function GroupForm({ snap, id, pigs }: { snap: Snapshot; id: string; pigs: strin
         <Text style={ui.small}>{coverage || 'Nobody is selected yet.'}</Text>
         <Button
           label={busy ? 'Saving…' : existing ? 'Save group event' : 'Record group event'}
-          disabled={busy || !can(snap.actor.role, 'write')}
+          disabled={busy || !can(snap.actor.role, 'write') || eventDate > todayISO()}
           onPress={() => {
             void submit(async (repo, actor) => {
               const saved = await repo.saveMass(

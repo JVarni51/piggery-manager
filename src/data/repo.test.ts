@@ -357,7 +357,7 @@ describe('seeded herd book', () => {
       eventInput({
         pigId: patsy.id,
         eventType: 'breeding',
-        eventDate: '2026-10-22',
+        eventDate: '2026-10-20',
         sireId: redford.id,
         matingMethod: 'natural',
       }),
@@ -368,10 +368,47 @@ describe('seeded herd book', () => {
     );
     assert.equal(close?.breedingEventId, first);
     const second = returned.events.find(
-      (event) => event.pigId === patsy.id && event.eventType === 'breeding' && event.eventDate === '2026-10-22',
+      (event) => event.pigId === patsy.id && event.eventType === 'breeding' && event.eventDate === '2026-10-20',
     );
-    assert.equal(second?.dueDate, '2027-02-13');
+    assert.equal(second?.dueDate, '2027-02-11');
     assert.notEqual(second?.heatId, first);
+  });
+
+  it('counts parity from farrowings, links an unlinked farrowing, and rejects a future weight', async () => {
+    const db = await openMemoryDatabase();
+    const repo = createRepo(db);
+    const snap = await repo.ensureReady('2026-10-20');
+    const clementine = snap.pigs.find((pig) => pig.name === 'Clementine');
+    const hazel = snap.pigs.find((pig) => pig.name === 'Hazel');
+    const pebble = snap.pigs.find((pig) => pig.name === 'Pebble');
+    assert.ok(clementine && hazel && pebble);
+    const clemLitters = snap.litters.filter((litter) => litter.sowId === clementine.id).sort((a, b) => a.farrowDate.localeCompare(b.farrowDate));
+    assert.deepEqual(clemLitters.map((litter) => litter.parity), [1]);
+    const hazelLitters = snap.litters.filter((litter) => litter.sowId === hazel.id).sort((a, b) => a.farrowDate.localeCompare(b.farrowDate));
+    assert.deepEqual(hazelLitters.map((litter) => litter.parity), [1, 2]);
+
+    const openService = snap.events.find((event) => event.pigId === clementine.id && event.eventType === 'breeding' && event.eventDate === '2026-07-02');
+    assert.ok(openService);
+    await repo.saveEvent(
+      snap.actor,
+      eventInput({ pigId: clementine.id, eventType: 'farrowing', eventDate: '2026-10-18', bornAlive: 8, parity: 9, litterNumber: 'C-6' }),
+    );
+    await repo.saveEvent(
+      snap.actor,
+      eventInput({ pigId: clementine.id, eventType: 'farrowing', eventDate: '2026-10-20', bornAlive: 7, parity: 9, litterNumber: 'C-7' }),
+    );
+    const after = await repo.load();
+    const recorded = after.litters.filter((litter) => litter.sowId === clementine.id).sort((a, b) => a.farrowDate.localeCompare(b.farrowDate) || a.id.localeCompare(b.id));
+    assert.deepEqual(recorded.map((litter) => litter.parity), [1, 2, 3]);
+    const linked = after.events.find((event) => event.pigId === clementine.id && event.eventType === 'farrowing' && event.eventDate === '2026-10-18');
+    assert.equal(linked?.breedingEventId, openService.id);
+    const second = after.events.find((event) => event.pigId === clementine.id && event.eventType === 'farrowing' && event.eventDate === '2026-10-20');
+    assert.equal(second?.breedingEventId, null);
+
+    await assert.rejects(
+      () => repo.saveEvent(snap.actor, eventInput({ pigId: pebble.id, eventType: 'weight', eventDate: '2027-02-01', weightLb: 50, weightContext: 'routine' })),
+      (error: unknown) => error instanceof HerdError && /before today/.test(error.message),
+    );
   });
 });
 

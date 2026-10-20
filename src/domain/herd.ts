@@ -304,19 +304,70 @@ export function heatCheckDate(serviceDate: string, heatCycleDays: number): strin
   return addDays(serviceDate, Math.max(1, heatCycleDays || HEAT_CYCLE_DEFAULT));
 }
 
-function isOpenBreeding(breeding: BreedingMath, outcomes: OutcomeMath[]): boolean {
-  if (breeding.deletedAt) return false;
-  return !outcomes.some((event) => {
-    if (event.deletedAt || event.breedingEventId !== breeding.id) return false;
-    if (event.eventType === 'farrowing' || event.eventType === 'aborted') return true;
-    if (event.eventType === 'pregnancy_check' && (event.pregResult === 'open' || event.pregResult === 'returned')) return true;
-    return false;
-  });
+function outcomeClosesService(event: OutcomeMath): boolean {
+  if (event.deletedAt) return false;
+  if (event.eventType === 'farrowing' || event.eventType === 'aborted') return true;
+  return event.eventType === 'pregnancy_check' && (event.pregResult === 'open' || event.pregResult === 'returned');
 }
 
-export function heatIsOpen(services: BreedingMath[], outcomes: OutcomeMath[]): boolean {
+/**
+ * Explicit links win. A farrowing with no breeding id closes the nearest earlier
+ * service that is still open, so Expected farrow clears without a manual link.
+ */
+export function assignedBreedingIds(breedings: BreedingMath[], outcomes: OutcomeMath[]): Map<string, string> {
+  const assigned = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const outcome of outcomes) {
+    if (!outcome.breedingEventId || !outcomeClosesService(outcome)) continue;
+    assigned.set(outcome.id, outcome.breedingEventId);
+    taken.add(outcome.breedingEventId);
+  }
+  const unlinked = outcomes
+    .filter((outcome) => !outcome.deletedAt && outcome.eventType === 'farrowing' && !outcome.breedingEventId)
+    .sort((a, b) => a.eventDate.localeCompare(b.eventDate) || a.id.localeCompare(b.id));
+  for (const farrow of unlinked) {
+    const nearest = breedings
+      .filter((service) => !service.deletedAt && service.pigId === farrow.pigId && service.eventDate <= farrow.eventDate && !taken.has(service.id))
+      .sort((a, b) => a.eventDate.localeCompare(b.eventDate) || a.id.localeCompare(b.id))
+      .at(-1);
+    if (!nearest) continue;
+    assigned.set(farrow.id, nearest.id);
+    taken.add(nearest.id);
+  }
+  return assigned;
+}
+
+export function heatIsOpen(services: BreedingMath[], outcomes: OutcomeMath[], allServices: BreedingMath[] = services): boolean {
   if (!services.length) return false;
-  return services.every((service) => isOpenBreeding(service, outcomes));
+  const assigned = assignedBreedingIds(allServices, outcomes);
+  const closed = new Set<string>();
+  for (const outcome of outcomes) {
+    const breedingId = assigned.get(outcome.id);
+    if (breedingId && outcomeClosesService(outcome)) closed.add(breedingId);
+  }
+  return services.every((service) => !service.deletedAt && !closed.has(service.id));
+}
+
+/** Another farrowing within a week, or a farrowing far short of gestation. */
+export function farrowingWarnings(input: {
+  eventDate: string;
+  otherFarrowDates: string[];
+  serviceDate?: string | null;
+}): string[] {
+  const warnings: string[] = [];
+  for (const date of input.otherFarrowDates) {
+    const gap = Math.abs(diffDays(date, input.eventDate));
+    if (gap <= 7) {
+      warnings.push(`A farrowing is already recorded on ${date}, ${gap === 0 ? 'the same day' : `${gap} days away`}.`);
+    }
+  }
+  if (input.serviceDate && input.serviceDate <= input.eventDate) {
+    const days = diffDays(input.serviceDate, input.eventDate);
+    if (days < 100) {
+      warnings.push(`This is ${days} days after the service on ${input.serviceDate}. Gestation is about ${GESTATION_DEFAULT} days.`);
+    }
+  }
+  return warnings;
 }
 
 /** Group a sow's services into heats. Repeats within a few days share a heat. */
@@ -361,7 +412,7 @@ export function planBreedingHeat(input: {
   outcomes: OutcomeMath[];
 }): { heatId: string; dueDate: string; returnedServiceIds: string[] } {
   const heats = clusterHeats(input.services.filter((service) => service.pigId === input.pigId && service.id !== input.newId));
-  const open = heats.filter((heat) => heatIsOpen(heat, input.outcomes));
+  const open = heats.filter((heat) => heatIsOpen(heat, input.outcomes, input.services));
   for (const heat of open) {
     const first = heat[0];
     const last = heat[heat.length - 1];
@@ -459,13 +510,17 @@ export function herdKpis(input: {
   const from = addDays(input.today, -364);
   const sowCount = averageBreedingFemales(input.pigs, input.breedings, from, input.today);
   const heats = clusterHeats(input.breedings);
+  const assignments = assignedBreedingIds(input.breedings, input.outcomes);
   let matings = 0;
   let farrowed = 0;
   for (const heat of heats) {
     const first = heat[0];
     if (!inRange(first.eventDate, from, input.today)) continue;
     const memberIds = new Set(heat.map((service) => service.id));
-    const linked = input.outcomes.filter((event) => !event.deletedAt && event.breedingEventId && memberIds.has(event.breedingEventId));
+    const linked = input.outcomes.filter((event) => {
+      const breedingId = assignments.get(event.id);
+      return !event.deletedAt && breedingId != null && memberIds.has(breedingId);
+    });
     const didFarrow = linked.some((event) => event.eventType === 'farrowing');
     const opened = linked.some(
       (event) => event.eventType === 'pregnancy_check' && (event.pregResult === 'open' || event.pregResult === 'returned'),
@@ -527,6 +582,7 @@ export type MoneyTxn = { kind: 'income' | 'expense'; date: string; amountCents: 
 export type MoneyBucket = { key: string; label: string; incomeCents: number; expenseCents: number };
 
 export function moneyBuckets(txns: MoneyTxn[], from: string | null, to: string): MoneyBucket[] {
+  if (from && from > to) return [];
   const filtered = txns.filter((txn) => inRange(txn.date, from, to));
   const span = from ? diffDays(from, to) : 400;
   const byDay = span <= 45;
@@ -678,7 +734,7 @@ export function upcomingTasks(input: {
     if (!pig) return 'Unknown pig';
     return pig.name ? `${pig.tag} ${pig.name}` : pig.tag;
   };
-  const openHeats = clusterHeats(input.breedings).filter((heat) => heatIsOpen(heat, input.outcomes));
+  const openHeats = clusterHeats(input.breedings).filter((heat) => heatIsOpen(heat, input.outcomes, input.breedings));
   for (const heat of openHeats) {
     const breeding = heat[0];
     const due = expectedFarrowDate(breeding.eventDate, input.gestationDays);
@@ -765,5 +821,3 @@ export function upcomingTasks(input: {
   const rank = { bad: 0, warn: 1, info: 2 };
   return items.sort((a, b) => rank[a.tone] - rank[b.tone] || a.title.localeCompare(b.title));
 }
-
-export { isOpenBreeding };

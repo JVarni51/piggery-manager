@@ -32,7 +32,7 @@ export function Page({
 }) {
   const { narrow } = useNarrow();
   return (
-    <ScrollView contentContainerStyle={[styles.page, narrow && { paddingBottom: 128 }]}>
+    <ScrollView contentContainerStyle={[styles.page, narrow && { paddingBottom: 32 }]}>
       <View style={[styles.titleRow, narrow && { flexDirection: 'column', alignItems: 'stretch' }]}>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={ui.h1}>{title}</Text>
@@ -167,51 +167,55 @@ export function Select({
   options: { value: string; label: string }[];
   placeholder?: string;
 }) {
+  const { narrow } = useNarrow();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const current = options.find((option) => option.value === value);
   const filtered = options.filter((option) => option.label.toLowerCase().includes(query.trim().toLowerCase()));
+  const choose = (next: string) => {
+    onChange(next);
+    setOpen(false);
+    setQuery('');
+  };
+  const list = (
+    <ScrollView style={{ maxHeight: narrow ? 420 : 260 }} keyboardShouldPersistTaps="handled">
+      {filtered.map((option) => (
+        <Pressable key={option.value || 'empty'} accessibilityRole="button" onPress={() => choose(option.value)} style={styles.option}>
+          <Text style={[ui.body, option.value === value && { color: colors.copper, fontWeight: '700' }]}>{option.label}</Text>
+        </Pressable>
+      ))}
+      {filtered.length === 0 ? <Text style={ui.small}>Nothing matches.</Text> : null}
+    </ScrollView>
+  );
   return (
-    <View style={styles.field}>
+    <View style={[styles.field, open && !narrow ? { zIndex: 40 } : null]}>
       <Text style={ui.label}>{label}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={() => setOpen(true)} style={styles.input}>
+      <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={() => setOpen((currentOpen) => !currentOpen)} style={styles.input}>
         <Text style={{ fontFamily: sans, fontSize: 16, color: current ? colors.text : '#A3988C' }}>
           {current?.label || placeholder}
         </Text>
       </Pressable>
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <Pressable style={styles.sheet} onPress={() => undefined}>
-            <Text style={ui.h2}>{label}</Text>
-            {options.length > 8 ? (
-              <TextInput
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search"
-                placeholderTextColor="#A3988C"
-                style={styles.input}
-              />
-            ) : null}
-            <ScrollView style={{ maxHeight: 420 }}>
-              {filtered.map((option) => (
-                <Pressable
-                  key={option.value || 'empty'}
-                  accessibilityRole="button"
-                  onPress={() => {
-                    onChange(option.value);
-                    setOpen(false);
-                    setQuery('');
-                  }}
-                  style={styles.option}
-                >
-                  <Text style={[ui.body, option.value === value && { color: colors.copper, fontWeight: '700' }]}>{option.label}</Text>
-                </Pressable>
-              ))}
-              {filtered.length === 0 ? <Text style={ui.small}>Nothing matches.</Text> : null}
-            </ScrollView>
+      {open && !narrow ? (
+        <View style={styles.menu}>
+          {options.length > 8 ? (
+            <TextInput value={query} onChangeText={setQuery} placeholder="Search" placeholderTextColor="#A3988C" style={styles.input} />
+          ) : null}
+          {list}
+        </View>
+      ) : null}
+      {open && narrow ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+          <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
+            <Pressable style={styles.sheet} onPress={() => undefined}>
+              <Text style={ui.h2}>{label}</Text>
+              {options.length > 8 ? (
+                <TextInput value={query} onChangeText={setQuery} placeholder="Search" placeholderTextColor="#A3988C" style={styles.input} />
+              ) : null}
+              {list}
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
+      ) : null}
     </View>
   );
 }
@@ -391,7 +395,21 @@ const styles = StyleSheet.create({
   buttonText: { color: colors.white, fontFamily: sans, fontSize: 16, fontWeight: '700' },
   badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   notice: { borderRadius: 12, padding: 12 },
-  field: { flexGrow: 1, flexBasis: 220, gap: 0 },
+  field: { flexGrow: 1, flexBasis: 220, gap: 0, position: 'relative' },
+  menu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    zIndex: 40,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    padding: 8,
+    maxHeight: 300,
+  },
   input: {
     minHeight: 48,
     borderRadius: 10,

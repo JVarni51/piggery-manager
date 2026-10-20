@@ -5,10 +5,13 @@ import { addDays, diffDays, rangeFor, shiftDate } from './dates';
 import { compareNatural } from './format';
 import {
   activeWithdrawals,
+  assignedBreedingIds,
   averageBreedingFemales,
   can,
   clusterHeats,
   expectedFarrowDate,
+  farrowingWarnings,
+  heatIsOpen,
   herdKpis,
   isSelfOrDescendant,
   lifetimeAdg,
@@ -257,6 +260,18 @@ describe('litters and herd KPIs', () => {
     ]);
     assert.equal(heats.length, 1);
     assert.equal(parityForFarrow(['2026-01-01', '2026-08-01'], '2026-08-01'), 2);
+    assert.equal(parityForFarrow(['2026-04-12', '2026-10-20'], '2026-10-21'), 3);
+    const services = [
+      { id: 'early', pigId: 'sow', eventDate: '2026-01-01' },
+      { id: 'open', pigId: 'sow', eventDate: '2026-07-02' },
+    ];
+    const unlinked = [
+      { id: 'f', pigId: 'sow', eventType: 'farrowing', eventDate: '2026-10-20', breedingEventId: null, pregResult: null },
+    ];
+    assert.equal(assignedBreedingIds(services, unlinked).get('f'), 'open');
+    assert.equal(heatIsOpen([services[1]], unlinked, services), false);
+    assert.equal(heatIsOpen([services[0]], unlinked, services), true);
+    assert.ok(farrowingWarnings({ eventDate: '2026-10-20', otherFarrowDates: ['2026-10-20'], serviceDate: '2026-10-16' }).length >= 2);
     const litter = {
       id: 'L',
       sowId: 'S',
@@ -285,6 +300,10 @@ describe('money, stock, pedigree guards, roles', () => {
     assert.equal(day?.incomeCents, 18000);
     assert.equal(day?.expenseCents, 2800);
     assert.equal(toCsv(['Note'], [['She said "sold"']]), 'Note\r\n"She said ""sold"""');
+    assert.deepEqual(
+      moneyBuckets([{ kind: 'expense', date: '2026-10-10', amountCents: 1, categoryId: null }], '2026-10-10', '2026-10-01'),
+      [],
+    );
   });
 
   it('nets feed stock and suggests a category', () => {

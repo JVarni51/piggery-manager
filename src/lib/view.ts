@@ -98,7 +98,7 @@ export function openBreeding(events: HerdEvent[], pigId: string, gestationDays: 
       heatId: event.heatId,
     })),
   )
-    .filter((heat) => heatIsOpen(heat, mine))
+    .filter((heat) => heatIsOpen(heat, mine, breedings))
     .sort((a, b) => b[0].eventDate.localeCompare(a[0].eventDate));
   const latest = open[0];
   if (!latest) return null;
@@ -111,14 +111,14 @@ export function openBreeding(events: HerdEvent[], pigId: string, gestationDays: 
   };
 }
 
+/** Parity is how many farrowings are recorded, not a hand-typed number. */
 export function parityOf(snap: Snapshot, pigId: string): number {
-  const litters = snap.litters.filter((litter) => litter.sowId === pigId);
-  const recorded = litters.reduce((max, litter) => Math.max(max, litter.parity ?? 0), 0);
-  return Math.max(recorded, litters.length);
+  return snap.litters.filter((litter) => litter.sowId === pigId).length;
 }
 
 export function pigSummary(snap: Snapshot, pig: Pig, today = todayISO()) {
-  const breeding = openBreeding(snap.events, pig.id, snap.farm.gestationDays);
+  const left = pig.status === 'sold' || pig.status === 'dead' || pig.status === 'culled';
+  const breeding = left ? null : openBreeding(snap.events, pig.id, snap.farm.gestationDays);
   const weights = weightPoints(snap.events, pig.id);
   const lastWeight = [...weights].sort((a, b) => b.date.localeCompare(a.date))[0];
   const holds = activeWithdrawals(snap.events, pig.id, today);
