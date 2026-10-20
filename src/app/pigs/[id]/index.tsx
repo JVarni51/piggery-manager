@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { can } from '@/domain/herd';
+import { can, clearOn } from '@/domain/herd';
 import { prettyDate, todayISO } from '@/domain/dates';
 import { adgLabel, pounds } from '@/domain/format';
 import { EVENT_LABELS, STAGE_LABELS, STATUS_LABELS, roleWord, sourceLabel } from '@/domain/labels';
@@ -87,7 +87,7 @@ function Detail({ pigId }: { pigId: string }) {
                   <Badge label={STATUS_LABELS[pig.status] || pig.status} tone={pig.status === 'active' ? 'good' : 'warn'} />
                   <Badge label={pig.gender === 'female' ? 'Female' : 'Male'} tone="info" />
                   {pig.castrated ? <Badge label="Castrated" tone="neutral" /> : null}
-                  {summary.holds[0] ? <Badge label={`Not clear until ${summary.holds[0].ends}`} tone="bad" /> : null}
+                  {summary.holds[0] ? <Badge label={`Not clear until ${prettyDate(clearOn(summary.holds[0].ends))}`} tone="bad" /> : null}
                 </View>
                 <Text style={ui.small}>Updated {prettyDate(pig.updatedAt.slice(0, 10))}{pig.updatedBy ? ` by ${pig.updatedBy}` : ''}.</Text>
               </View>
