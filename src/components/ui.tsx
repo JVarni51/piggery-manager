@@ -1,4 +1,4 @@
-import { createElement, useState, type ReactNode } from 'react';
+import { createElement, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Modal,
   Platform,
@@ -13,6 +13,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { colors, sans, serif, ui } from '@/theme';
+import { PopMenu } from './popMenu';
 
 export function useNarrow() {
   const { width } = useWindowDimensions();
@@ -168,8 +169,10 @@ export function Select({
   placeholder?: string;
 }) {
   const { narrow } = useNarrow();
+  const anchor = useRef<{ getBoundingClientRect?: () => { bottom: number; left: number; width: number } } | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
   const current = options.find((option) => option.value === value);
   const filtered = options.filter((option) => option.label.toLowerCase().includes(query.trim().toLowerCase()));
   const choose = (next: string) => {
@@ -177,6 +180,22 @@ export function Select({
     setOpen(false);
     setQuery('');
   };
+  useEffect(() => {
+    if (!open || narrow || Platform.OS !== 'web') return;
+    const place = () => {
+      const node = anchor.current as unknown as { getBoundingClientRect?: () => { bottom: number; left: number; width: number } } | null;
+      const rect = node?.getBoundingClientRect?.();
+      if (!rect) return;
+      setBox({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 180) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open, narrow]);
   const list = (
     <ScrollView style={{ maxHeight: narrow ? 420 : 260 }} keyboardShouldPersistTaps="handled">
       {filtered.map((option) => (
@@ -190,18 +209,29 @@ export function Select({
   return (
     <View style={[styles.field, open && !narrow ? { zIndex: 40 } : null]}>
       <Text style={ui.label}>{label}</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={() => setOpen((currentOpen) => !currentOpen)} style={styles.input}>
+      <Pressable
+        ref={(node) => {
+          anchor.current = node as typeof anchor.current;
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={() => setOpen((currentOpen) => !currentOpen)}
+        style={styles.input}
+      >
         <Text style={{ fontFamily: sans, fontSize: 16, color: current ? colors.text : '#A3988C' }}>
           {current?.label || placeholder}
         </Text>
       </Pressable>
-      {open && !narrow ? (
-        <View style={styles.menu}>
-          {options.length > 8 ? (
-            <TextInput value={query} onChangeText={setQuery} placeholder="Search" placeholderTextColor="#A3988C" style={styles.input} />
-          ) : null}
-          {list}
-        </View>
+      {open && !narrow && box ? (
+        <PopMenu>
+          <Pressable accessibilityLabel="Close menu" onPress={() => setOpen(false)} style={styles.scrim} />
+          <View style={[styles.popover, { top: box.top, left: box.left, width: box.width }]}>
+            {options.length > 8 ? (
+              <TextInput value={query} onChangeText={setQuery} placeholder="Search" placeholderTextColor="#A3988C" style={styles.input} />
+            ) : null}
+            {list}
+          </View>
+        </PopMenu>
       ) : null}
       {open && narrow ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -396,13 +426,17 @@ const styles = StyleSheet.create({
   badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   notice: { borderRadius: 12, padding: 12 },
   field: { flexGrow: 1, flexBasis: 220, gap: 0, position: 'relative' },
-  menu: {
-    position: 'absolute',
-    top: '100%',
+  scrim: {
+    position: 'fixed' as 'absolute',
+    top: 0,
     left: 0,
     right: 0,
-    marginTop: 4,
+    bottom: 0,
     zIndex: 40,
+  },
+  popover: {
+    position: 'fixed' as 'absolute',
+    zIndex: 50,
     backgroundColor: colors.paper,
     borderWidth: 1,
     borderColor: colors.line,
