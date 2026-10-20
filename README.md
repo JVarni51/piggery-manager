@@ -33,7 +33,7 @@ npm run export:web
 
 That runs `npx expo export -p web`, then `scripts/clean-export.js`. Expo writes a few assets under `dist/assets/node_modules/` (the wa-sqlite wasm and the expo-router icons). Cloudflare Pages will not upload a path that contains `node_modules`, so the script moves those files to `dist/assets/vendor/` and rewrites the references. Use the same command as the Git build so Pages produces a clean `dist` itself.
 
-Publish the `dist/` folder. The build is a single-page app (`web.output` is `single`). `public/_redirects` is copied into `dist` so unknown paths fall back to `index.html`:
+Publish the `dist/` folder. The build is a single-page app (`web.output` is `single`). `public/_headers` sends `X-Robots-Tag: noindex` on every path, so a deploy is not indexed unless that header is removed. `public/_redirects` is copied into `dist` so unknown paths fall back to `index.html`:
 
 ```
 /*    /index.html   200

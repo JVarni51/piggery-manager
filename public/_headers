@@ -2,6 +2,7 @@
   Cross-Origin-Embedder-Policy: credentialless
   Cross-Origin-Opener-Policy: same-origin
   X-Content-Type-Options: nosniff
+  X-Robots-Tag: noindex
 
 /*.wasm
   Content-Type: application/wasm
