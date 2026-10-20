@@ -45,9 +45,18 @@ function Reports({ snap }: { snap: import('@/data/types').Snapshot }) {
   const rangeInvalid = preset === 'custom' && Boolean(from) && Boolean(to) && from > to;
 
   useEffect(() => {
-    if (!params.view || !params.preset) {
-      router.replace({ pathname: '/reports', params: { view, preset, ...(from ? { from } : {}), ...(to ? { to } : {}), ...(category ? { category } : {}) } });
-    }
+    if (params.view) return;
+    const requestedPreset = oneParam(params.preset);
+    router.replace({
+      pathname: '/reports',
+      params: {
+        view,
+        preset: requestedPreset || preset,
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+        ...(category ? { category } : {}),
+      },
+    });
   }, [params.view, params.preset, view, preset, from, to, category, router]);
 
   function setQuery(partial: Record<string, string>) {
