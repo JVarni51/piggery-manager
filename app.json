@@ -41,10 +41,23 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": false
-    }
+    },
+    "extra": {
+      "router": {
+        "headers": {
+          "Cross-Origin-Embedder-Policy": "credentialless",
+          "Cross-Origin-Opener-Policy": "same-origin"
+        }
+      },
+      "eas": {
+        "projectId": "a4efd1da-e0cc-47e9-b3ec-3b2bcf2cd805"
+      }
+    },
+    "owner": "jvarni51"
   }
 }

@@ -17,13 +17,13 @@ Data stays in the browser through sql.js and IndexedDB. The iOS and Android buil
 
 ## Expo Go
 
-This project is Expo SDK 58. Install a matching Expo Go, then:
+This project is Expo SDK 57, which matches the App Store Expo Go build (`expoGoSdkVersion` 57.0.0). Then:
 
 ```bash
 npx expo start
 ```
 
-Scan the QR code from the terminal. If Expo Go asks you to upgrade, the store build is behind SDK 58 and this project will not open until it matches.
+Scan the QR code from the terminal.
 
 ## Static hosting (Cloudflare Pages)
 
