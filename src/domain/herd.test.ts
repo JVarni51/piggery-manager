@@ -19,6 +19,8 @@ import {
   parentAgeProblem,
   parityForFarrow,
   pigsOnSow,
+  sowLifetime,
+  sowLifetimeSummary,
   planBreedingHeat,
   preweanMortality,
   recentAdg,
@@ -116,6 +118,80 @@ describe('weights, pace, withdrawal', () => {
     assert.equal(saleBlockReason(clear), null);
     assert.equal(beforeTreatment.length, 0);
     assert.equal(showEntryBlock(activeWithdrawals(events, 'p1', '2026-10-20'), '2026-10-20').block, null);
+  });
+});
+
+describe('sow lifetime farrowing', () => {
+  it('stays empty when the sow has no litters', () => {
+    const stats = sowLifetime([]);
+    assert.equal(stats.litters, 0);
+    assert.equal(stats.totalBorn, 0);
+    assert.equal(stats.bornAlive, 0);
+    assert.equal(stats.stillborn, 0);
+    assert.equal(stats.mummies, 0);
+    assert.equal(stats.bornDead, 0);
+    assert.equal(stats.bornAliveRate, null);
+    assert.equal(stats.bornDeadRate, null);
+    assert.equal(stats.stillbornRate, null);
+    assert.equal(stats.mummyRate, null);
+    assert.equal(stats.weaned, 0);
+    assert.equal(stats.weanedLitters, 0);
+    assert.equal(stats.avgWeanedPerLitter, null);
+    assert.equal(sowLifetimeSummary(stats), 'No litters yet');
+  });
+
+  it('counts mummies as born dead and still reports them on their own', () => {
+    const stats = sowLifetime([
+      { bornAlive: 9, stillborn: 0, mummies: 1, weanedCount: 9 },
+      { bornAlive: 10, stillborn: 2, mummies: 0, weanedCount: null },
+    ]);
+    assert.equal(stats.litters, 2);
+    assert.equal(stats.totalBorn, 22);
+    assert.equal(stats.bornAlive, 19);
+    assert.equal(stats.stillborn, 2);
+    assert.equal(stats.mummies, 1);
+    assert.equal(stats.bornDead, 3);
+    assert.ok(stats.bornAliveRate != null && Math.abs(stats.bornAliveRate - 19 / 22) < 1e-9);
+    assert.ok(stats.bornDeadRate != null && Math.abs(stats.bornDeadRate - 3 / 22) < 1e-9);
+    assert.ok(stats.stillbornRate != null && Math.abs(stats.stillbornRate - 2 / 22) < 1e-9);
+    assert.ok(stats.mummyRate != null && Math.abs(stats.mummyRate - 1 / 22) < 1e-9);
+    assert.equal(stats.weaned, 9);
+    assert.equal(stats.weanedLitters, 1);
+    assert.equal(stats.avgWeanedPerLitter, 9);
+    assert.equal(
+      sowLifetimeSummary(stats),
+      '2 litters · 86.4% born alive · 13.6% born dead · 2 stillborn · 4.5% mummified · 9 weaned · 9.0 avg weaned per weaned litter',
+    );
+  });
+
+  it('averages weaned piglets across every weaned litter', () => {
+    const stats = sowLifetime([
+      { bornAlive: 11, stillborn: 1, mummies: 0, weanedCount: 9 },
+      { bornAlive: 12, stillborn: 1, mummies: 0, weanedCount: 10 },
+    ]);
+    assert.equal(stats.totalBorn, 25);
+    assert.equal(stats.bornDead, 2);
+    assert.equal(stats.mummies, 0);
+    assert.ok(stats.bornAliveRate != null && Math.abs(stats.bornAliveRate - 23 / 25) < 1e-9);
+    assert.ok(stats.bornDeadRate != null && Math.abs(stats.bornDeadRate - 2 / 25) < 1e-9);
+    assert.equal(stats.weaned, 19);
+    assert.equal(stats.weanedLitters, 2);
+    assert.equal(stats.avgWeanedPerLitter, 9.5);
+    assert.equal(
+      sowLifetimeSummary(stats),
+      '2 litters · 92.0% born alive · 8.0% born dead · 19 weaned · 9.5 avg weaned per litter',
+    );
+  });
+
+  it('keeps a recorded litter that produced no piglets', () => {
+    const stats = sowLifetime([{ bornAlive: 0, stillborn: 0, mummies: 0, weanedCount: 0 }]);
+    assert.equal(stats.litters, 1);
+    assert.equal(stats.totalBorn, 0);
+    assert.equal(stats.bornAliveRate, null);
+    assert.equal(stats.bornDeadRate, null);
+    assert.equal(stats.weaned, 0);
+    assert.equal(stats.avgWeanedPerLitter, 0);
+    assert.equal(sowLifetimeSummary(stats), '1 litter · — born alive · — born dead · 0 weaned · 0.0 avg weaned per litter');
   });
 });
 

@@ -282,19 +282,34 @@ export function ChoiceList({
 export function StackList({
   rows,
 }: {
-  rows: { key: string; title: string; meta?: string; detail?: string; tone?: 'good' | 'bad' | 'warn' | 'info' | 'neutral'; onPress?: () => void; action?: ReactNode }[];
+  rows: {
+    key: string;
+    title: string;
+    meta?: string;
+    detail?: string;
+    extra?: ReactNode;
+    tone?: 'good' | 'bad' | 'warn' | 'info' | 'neutral';
+    onPress?: () => void;
+    action?: ReactNode;
+  }[];
 }) {
   if (rows.length === 0) return <Text style={ui.small}>Nothing in this list yet.</Text>;
   return (
     <View style={{ gap: 8 }}>
       {rows.map((row) => (
-        <Pressable key={row.key} onPress={row.onPress} style={styles.rowCard} accessibilityRole={row.onPress ? 'button' : undefined}>
+        <Pressable
+          key={row.key}
+          onPress={row.onPress}
+          style={[styles.rowCard, row.extra ? { alignItems: 'flex-start' } : null]}
+          accessibilityRole={row.onPress ? 'button' : undefined}
+        >
           <View style={{ flex: 1, gap: 4 }}>
             <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
               <Text style={{ fontFamily: sans, fontSize: 16, fontWeight: '700', color: colors.text }}>{row.title}</Text>
               {row.meta ? <Badge label={row.meta} tone={row.tone || 'neutral'} /> : null}
             </View>
             {row.detail ? <Text style={ui.small}>{row.detail}</Text> : null}
+            {row.extra}
           </View>
           {row.action}
         </Pressable>

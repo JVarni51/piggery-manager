@@ -5,12 +5,13 @@ import { can } from '@/domain/herd';
 import { STAGE_LABELS, STATUS_LABELS } from '@/domain/labels';
 import { compareNatural, pounds } from '@/domain/format';
 import { toCsv } from '@/domain/csv';
-import { ageLabel, cleanParams, named, oneParam, pigLabel } from '@/lib/view';
+import { ageLabel, cleanParams, littersForSow, named, oneParam, pigLabel, showsLifetimeFarrowing } from '@/lib/view';
 import { downloadText } from '@/lib/download';
 import { colors, sans } from '@/theme';
 import { Gate } from '@/components/Gate';
 import { useStickyAdd } from '@/components/Shell';
 import { useSave } from '@/components/useSave';
+import { SowLifetimeGlance } from '@/components/SowLifetime';
 import { Badge, Button, Card, Field, Filters, Notice, Page, Select, StackList, useNarrow } from '@/components/ui';
 
 export default function PigsPage() {
@@ -133,25 +134,30 @@ function Pigs({ snap }: { snap: import('@/data/types').Snapshot }) {
         </Card>
       ) : (
         <StackList
-          rows={rows.map((pig) => ({
-            key: pig.id,
-            title: pigLabel(pig),
-            meta: STATUS_LABELS[pig.status] || pig.status,
-            tone: pig.status === 'active' ? 'good' : pig.status === 'sold' ? 'info' : pig.status === 'archived' ? 'neutral' : 'bad',
-            detail: `${STAGE_LABELS[pig.stage]} · ${named(snap.breeds, pig.breedId)} · ${named(snap.groups, pig.groupId)} · ${pounds(pig.weightLb, 0)} · ${ageLabel(pig.dob)}`,
-            onPress: () => {
-              if (!picking) {
-                router.push(`/pigs/${pig.id}`);
-                return;
-              }
-              setPicked((current) => (current.includes(pig.id) ? current.filter((id) => id !== pig.id) : [...current, pig.id]));
-            },
-            action: picking ? (
-              <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: picked.includes(pig.id) }} onPress={() => setPicked((current) => (current.includes(pig.id) ? current.filter((id) => id !== pig.id) : [...current, pig.id]))}>
-                <Badge label={picked.includes(pig.id) ? 'Selected' : 'Select'} tone={picked.includes(pig.id) ? 'info' : 'neutral'} />
-              </Pressable>
-            ) : null,
-          }))}
+          rows={rows.map((pig) => {
+            const farrowings = littersForSow(snap, pig.id);
+            const showLifetime = showsLifetimeFarrowing(pig, farrowings.length);
+            return {
+              key: pig.id,
+              title: pigLabel(pig),
+              meta: STATUS_LABELS[pig.status] || pig.status,
+              tone: pig.status === 'active' ? 'good' : pig.status === 'sold' ? 'info' : pig.status === 'archived' ? 'neutral' : 'bad',
+              detail: `${STAGE_LABELS[pig.stage]} · ${named(snap.breeds, pig.breedId)} · ${named(snap.groups, pig.groupId)} · ${pounds(pig.weightLb, 0)} · ${ageLabel(pig.dob)}`,
+              extra: showLifetime ? <SowLifetimeGlance litters={farrowings} layout="row" /> : null,
+              onPress: () => {
+                if (!picking) {
+                  router.push(`/pigs/${pig.id}`);
+                  return;
+                }
+                setPicked((current) => (current.includes(pig.id) ? current.filter((id) => id !== pig.id) : [...current, pig.id]));
+              },
+              action: picking ? (
+                <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: picked.includes(pig.id) }} onPress={() => setPicked((current) => (current.includes(pig.id) ? current.filter((id) => id !== pig.id) : [...current, pig.id]))}>
+                  <Badge label={picked.includes(pig.id) ? 'Selected' : 'Select'} tone={picked.includes(pig.id) ? 'info' : 'neutral'} />
+                </Pressable>
+              ) : null,
+            };
+          })}
         />
       )}
     </Page>

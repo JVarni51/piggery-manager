@@ -116,6 +116,15 @@ export function parityOf(snap: Snapshot, pigId: string): number {
   return snap.litters.filter((litter) => litter.sowId === pigId).length;
 }
 
+export function littersForSow(snap: Snapshot, pigId: string) {
+  return snap.litters.filter((litter) => litter.sowId === pigId);
+}
+
+/** Sows always show a lifetime line. A gilt does too once she has a litter. */
+export function showsLifetimeFarrowing(pig: { gender: string; stage: string }, litterCount: number): boolean {
+  return pig.stage === 'sow' || (pig.gender === 'female' && litterCount > 0);
+}
+
 export function pigSummary(snap: Snapshot, pig: Pig, today = todayISO()) {
   const left = pig.status === 'sold' || pig.status === 'dead' || pig.status === 'culled';
   const breeding = left ? null : openBreeding(snap.events, pig.id, snap.farm.gestationDays);

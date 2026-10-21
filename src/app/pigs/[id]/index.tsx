@@ -7,10 +7,11 @@ import { adgLabel, pounds } from '@/domain/format';
 import { EVENT_LABELS, STAGE_LABELS, STATUS_LABELS, roleWord, sourceLabel } from '@/domain/labels';
 import { WeightChart } from '@/components/Charts';
 import { eventSummary } from '@/domain/labels';
-import { ageLabel, named, oneParam, pigLabel, pigSummary } from '@/lib/view';
+import { ageLabel, littersForSow, named, oneParam, pigLabel, pigSummary, showsLifetimeFarrowing } from '@/lib/view';
 import { colors, sans, ui } from '@/theme';
 import { Gate } from '@/components/Gate';
 import { useSave } from '@/components/useSave';
+import { SowLifetimeGlance } from '@/components/SowLifetime';
 import { confirmAsync, Badge, Button, Card, Chips, Empty, Notice, Page } from '@/components/ui';
 
 const FILTERS = [
@@ -67,6 +68,8 @@ function Detail({ pigId }: { pigId: string }) {
         const sire = snap.pigs.find((row) => row.id === pig.sireId);
         const dam = snap.pigs.find((row) => row.id === pig.damId);
         const kids = snap.pigs.filter((row) => row.sireId === pig.id || row.damId === pig.id);
+        const farrowings = littersForSow(snap, pig.id);
+        const showLifetime = showsLifetimeFarrowing(pig, farrowings.length);
         return (
           <Page
             title={pigLabel(pig)}
@@ -92,6 +95,12 @@ function Detail({ pigId }: { pigId: string }) {
                 <Text style={ui.small}>Updated {prettyDate(pig.updatedAt.slice(0, 10))}{pig.updatedBy ? ` by ${pig.updatedBy}` : ''}.</Text>
               </View>
             </View>
+            {showLifetime ? (
+              <Card>
+                <Text style={ui.h2}>Lifetime farrowing</Text>
+                <SowLifetimeGlance litters={farrowings} layout="page" />
+              </Card>
+            ) : null}
             <Card>
               <Text style={ui.h2}>Where this pig stands</Text>
               <Line k="Status" v={STATUS_LABELS[pig.status] || pig.status} />

@@ -1,4 +1,5 @@
 import { addDays, diffDays, inRange, monthKey, monthLabel } from './dates';
+import { percent } from './format';
 
 export const GESTATION_DEFAULT = 114;
 export const WEAN_AGE_DEFAULT = 21;
@@ -271,6 +272,93 @@ export function pigsOnSow(litter: LitterMath, fosters: FosterMath[]): number {
 
 export function totalBorn(litter: { bornAlive: number; stillborn: number; mummies: number }): number {
   return litter.bornAlive + litter.stillborn + litter.mummies;
+}
+
+/** One farrowing record. Mummies are tracked apart from stillborn. */
+export type SowFarrowingRecord = {
+  bornAlive: number;
+  stillborn: number;
+  mummies: number;
+  weanedCount: number | null;
+};
+
+export type SowLifetimeStats = {
+  litters: number;
+  totalBorn: number;
+  bornAlive: number;
+  stillborn: number;
+  mummies: number;
+  /** Stillborn plus mummified. Mummies count as born dead. */
+  bornDead: number;
+  bornAliveRate: number | null;
+  bornDeadRate: number | null;
+  stillbornRate: number | null;
+  mummyRate: number | null;
+  weaned: number;
+  weanedLitters: number;
+  /** Recorded weaned piglets divided by litters that have a wean count. */
+  avgWeanedPerLitter: number | null;
+};
+
+/**
+ * Lifetime farrowing for one sow. Rates are shares of total born
+ * (born alive + stillborn + mummified). A null wean count is a litter
+ * that has not been weaned yet, so it stays out of the average.
+ */
+export function sowLifetime(litters: SowFarrowingRecord[]): SowLifetimeStats {
+  let bornAlive = 0;
+  let stillborn = 0;
+  let mummies = 0;
+  let weaned = 0;
+  let weanedLitters = 0;
+  for (const litter of litters) {
+    bornAlive += litter.bornAlive;
+    stillborn += litter.stillborn;
+    mummies += litter.mummies;
+    if (litter.weanedCount != null) {
+      weaned += litter.weanedCount;
+      weanedLitters += 1;
+    }
+  }
+  const totalBorn = bornAlive + stillborn + mummies;
+  const bornDead = stillborn + mummies;
+  const rate = (part: number) => (totalBorn > 0 ? part / totalBorn : null);
+  return {
+    litters: litters.length,
+    totalBorn,
+    bornAlive,
+    stillborn,
+    mummies,
+    bornDead,
+    bornAliveRate: rate(bornAlive),
+    bornDeadRate: rate(bornDead),
+    stillbornRate: rate(stillborn),
+    mummyRate: rate(mummies),
+    weaned,
+    weanedLitters,
+    avgWeanedPerLitter: weanedLitters > 0 ? weaned / weanedLitters : null,
+  };
+}
+
+/** One line for a sow row. Zero litters stay a sentence instead of a row of zeros. */
+export function sowLifetimeSummary(stats: SowLifetimeStats): string {
+  if (stats.litters === 0) return 'No litters yet';
+  const litterWord = stats.litters === 1 ? 'litter' : 'litters';
+  const parts = [
+    `${stats.litters} ${litterWord}`,
+    `${percent(stats.bornAliveRate)} born alive`,
+    `${percent(stats.bornDeadRate)} born dead`,
+  ];
+  if (stats.mummies > 0) {
+    parts.push(`${stats.stillborn} stillborn`);
+    parts.push(`${percent(stats.mummyRate)} mummified`);
+  }
+  parts.push(`${stats.weaned} weaned`);
+  if (stats.avgWeanedPerLitter != null) {
+    const avg = stats.avgWeanedPerLitter.toFixed(1);
+    parts.push(stats.weanedLitters === stats.litters ? `${avg} avg weaned per litter` : `${avg} avg weaned per weaned litter`);
+  }
+  return parts.join(' · ');
 }
 
 /** Parity of a farrowing is the sow's earlier farrowings plus one. */
